@@ -113,6 +113,8 @@ def init_db():
             )
         """)
 
+        conn.commit()
+
         for col, coltype in [("proteins_g", "REAL"), ("carbs_g", "REAL"), ("fats_g", "REAL")]:
             try:
                 c.execute(f"ALTER TABLE meals ADD COLUMN {col} {coltype} DEFAULT 0")
