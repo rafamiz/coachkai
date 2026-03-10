@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 
 import ai
 import db
+import charts as charts_module
 import scheduler as sched_module
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,34 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    user = db.get_user(telegram_id)
+    if not user or not user.get("onboarding_complete"):
+        await update.message.reply_text("Primero necesito conocerte 😊 Usá /start.")
+        return
+
+    meals = db.get_today_meals(telegram_id)
+    if not meals:
+        await update.message.reply_text("Todavía no registraste ninguna comida hoy 🍽️ ¡Mandame una foto o describí qué comiste!")
+        return
+
+    await update.message.reply_text("Generando tu resumen del día... 📊")
+
+    daily_goal = charts_module.estimate_daily_calories(user)
+    total_cal = sum(m.get("calories_est", 0) or 0 for m in meals)
+
+    try:
+        png_bytes = await charts_module.generate_daily_summary_chart(user, meals)
+        caption = await ai.generate_chart_caption(user, meals, total_cal, daily_goal)
+        await update.message.reply_photo(photo=png_bytes, caption=caption)
+    except Exception as e:
+        logger.error(f"[resumen] Chart error for {telegram_id}: {e}")
+        message = await ai.generate_daily_summary(user, meals)
+        if message:
+            await update.message.reply_text(message)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -138,6 +167,9 @@ async def _save_and_reply_meal(update: Update, user: dict, analysis: dict, descr
         calories_est=calories,
         meal_type=meal_type,
         claude_analysis=analysis.get("full_response", ""),
+        proteins_g=analysis.get("proteins_g", 0),
+        carbs_g=analysis.get("carbs_g", 0),
+        fats_g=analysis.get("fats_g", 0),
     )
 
     sched_module.update_eating_schedule(user_id, meal_type)

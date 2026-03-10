@@ -74,9 +74,10 @@ async def analyze_meal_text(description: str, user: dict) -> dict:
         "2. Estimación de calorías (número solo)\n"
         "3. Tipo de comida (breakfast/lunch/dinner/snack)\n"
         "4. Si se alinea con su objetivo (sí/no/parcialmente)\n"
-        "5. Un tip corto y práctico\n\n"
+        "5. Un tip corto y práctico\n"
+        "6. Estimación de macros en gramos (proteínas, carbohidratos, grasas)\n\n"
         "Formato de respuesta (JSON):\n"
-        '{"detected": "...", "calories": 450, "meal_type": "lunch", "aligned": "sí", "tip": "...", "full_response": "mensaje amigable al usuario"}'
+        '{"detected": "...", "calories": 450, "proteins_g": 25, "carbs_g": 45, "fats_g": 15, "meal_type": "lunch", "aligned": "sí", "tip": "...", "full_response": "mensaje amigable al usuario"}'
     )
     raw = await _ask([{"role": "user", "content": prompt}])
     return _parse_meal_json(raw)
@@ -104,7 +105,7 @@ async def analyze_meal_photo(photo_path: str, user: dict) -> dict:
         "4. Si se alinea con su objetivo\n"
         "5. Un tip corto\n\n"
         "Formato JSON:\n"
-        '{"detected": "...", "calories": 450, "meal_type": "lunch", "aligned": "sí", "tip": "...", "full_response": "mensaje amigable al usuario"}'
+        '{"detected": "...", "calories": 450, "proteins_g": 25, "carbs_g": 45, "fats_g": 15, "meal_type": "lunch", "aligned": "sí", "tip": "...", "full_response": "mensaje amigable al usuario"}'
     )
 
     try:
@@ -140,6 +141,9 @@ def _parse_meal_json(raw: str) -> dict:
     defaults = {
         "detected": "tu comida",
         "calories": 0,
+        "proteins_g": 0,
+        "carbs_g": 0,
+        "fats_g": 0,
         "meal_type": "snack",
         "aligned": "parcialmente",
         "tip": "",
@@ -175,6 +179,22 @@ async def generate_followup_message(user: dict, meal_type: str, ftype: str) -> s
             f"Mandá un check-in amigable a {user['name']} preguntándole cómo va su alimentación hoy. "
             "Máximo 2 oraciones, tono cálido."
         )
+    return await _ask([{"role": "user", "content": prompt}])
+
+
+async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_goal: int) -> str:
+    pct = int(total_cal / daily_goal * 100) if daily_goal else 0
+    meal_list = ", ".join(
+        f"{m.get('meal_type', 'comida')} (~{m.get('calories_est', 0)} kcal)" for m in meals
+    )
+    prompt = (
+        f"Hacé un resumen diario de alimentación para {user['name']}.\n"
+        f"Comidas: {meal_list}\n"
+        f"Total: {total_cal} kcal ({pct}% de meta diaria de {daily_goal} kcal)\n"
+        f"Objetivo: {user['goal']}\n\n"
+        "Resumen en 2-3 oraciones: qué comió, si estuvo bien, un aliento para mañana. "
+        "Agregá 1-2 emojis relevantes."
+    )
     return await _ask([{"role": "user", "content": prompt}])
 
 

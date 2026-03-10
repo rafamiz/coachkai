@@ -1,11 +1,13 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from io import BytesIO
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import db
 import ai
+import charts
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,8 @@ def start_scheduler(app):
     _scheduler = AsyncIOScheduler()
     _scheduler.add_job(check_and_send_followups, "interval", minutes=5, id="followup_check")
     _scheduler.add_job(update_all_schedules, "interval", hours=1, id="schedule_update")
-    _scheduler.add_job(send_daily_summaries, "cron", hour=21, minute=30, id="daily_summary")
+    # 21:00 ART = 00:00 UTC (UTC-3)
+    _scheduler.add_job(send_daily_summaries, "cron", hour=0, minute=0, id="daily_summary")
     _scheduler.start()
     logger.info("Scheduler started")
 
@@ -117,10 +120,33 @@ async def send_daily_summaries():
             continue
 
         try:
-            message = await ai.generate_daily_summary(user, meals)
-            if message:
-                await _bot_app.bot.send_message(chat_id=telegram_id, text=message)
-                db.add_followup(user_id, message, "summary")
-                logger.info(f"Sent daily summary to {telegram_id}")
+            await _send_summary_to_user(user, meals)
+            db.add_followup(user_id, "summary_chart", "summary")
+            logger.info(f"Sent daily summary to {telegram_id}")
         except Exception as e:
             logger.error(f"Error sending daily summary to {telegram_id}: {e}")
+
+
+async def _send_summary_to_user(user: dict, meals: list):
+    """Send chart image + text caption to one user. Used by scheduler and /resumen command."""
+    telegram_id = user["telegram_id"]
+    daily_goal = charts.estimate_daily_calories(user)
+    total_cal = sum(m.get("calories_est", 0) or 0 for m in meals)
+
+    try:
+        png_bytes = await charts.generate_daily_summary_chart(user, meals)
+        caption = await ai.generate_chart_caption(user, meals, total_cal, daily_goal)
+        await _bot_app.bot.send_photo(
+            chat_id=telegram_id,
+            photo=BytesIO(png_bytes),
+            caption=caption,
+        )
+    except Exception as chart_err:
+        logger.warning(f"Chart generation failed for {telegram_id}: {chart_err} — falling back to text")
+        message = await ai.generate_daily_summary(user, meals)
+        if message:
+            await _bot_app.bot.send_message(chat_id=telegram_id, text=message)
+
+
+def get_bot_app():
+    return _bot_app

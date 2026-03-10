@@ -43,9 +43,19 @@ def init_db():
             meal_type TEXT,
             eaten_at TEXT DEFAULT (datetime('now')),
             claude_analysis TEXT,
+            proteins_g REAL DEFAULT 0,
+            carbs_g REAL DEFAULT 0,
+            fats_g REAL DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
+
+    # Migrate existing tables without macro columns
+    for col, coltype in [("proteins_g", "REAL"), ("carbs_g", "REAL"), ("fats_g", "REAL")]:
+        try:
+            c.execute(f"ALTER TABLE meals ADD COLUMN {col} {coltype} DEFAULT 0")
+        except Exception:
+            pass
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS followups (
@@ -157,13 +167,15 @@ def get_all_users():
 # --- Meals ---
 
 def add_meal(user_id: int, telegram_id: int, description: str, photo_path: str,
-             calories_est: int, meal_type: str, claude_analysis: str):
+             calories_est: int, meal_type: str, claude_analysis: str,
+             proteins_g: float = 0, carbs_g: float = 0, fats_g: float = 0):
     conn = get_conn()
     c = conn.cursor()
     c.execute("""
-        INSERT INTO meals (user_id, telegram_id, description, photo_path, calories_est, meal_type, claude_analysis)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (user_id, telegram_id, description, photo_path, calories_est, meal_type, claude_analysis))
+        INSERT INTO meals (user_id, telegram_id, description, photo_path, calories_est, meal_type, claude_analysis, proteins_g, carbs_g, fats_g)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (user_id, telegram_id, description, photo_path, calories_est, meal_type, claude_analysis,
+          proteins_g or 0, carbs_g or 0, fats_g or 0))
     conn.commit()
     conn.close()
 

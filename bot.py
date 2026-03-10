@@ -62,6 +62,7 @@ def main():
     app.add_handler(CommandHandler("plan", handlers.cmd_plan))
     app.add_handler(CommandHandler("stats", handlers.cmd_stats))
     app.add_handler(CommandHandler("reset", handlers.cmd_reset))
+    app.add_handler(CommandHandler("resumen", handlers.cmd_resumen))
     app.add_handler(MessageHandler(filters.PHOTO, handlers.handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
     
