@@ -8,7 +8,10 @@ _client = None
 def get_client():
     global _client
     if _client is None:
-        _client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        import logging
+        logging.getLogger(__name__).info(f"[ai] API key loaded: {'YES (len=' + str(len(key)) + ')' if key else 'NO - KEY MISSING'}")
+        _client = anthropic.AsyncAnthropic(api_key=key)
     return _client
 
 
@@ -33,7 +36,8 @@ async def _ask(messages: list, system: str = SYSTEM_BASE) -> str:
         )
         return resp.content[0].text.strip()
     except Exception as e:
-        print(f"[ai] Claude error: {e}")
+        import logging
+        logging.getLogger(__name__).error(f"[ai] Claude error: {type(e).__name__}: {e}")
         return "Uy, tuve un problemita técnico 😅 Intentá de nuevo en un momento."
 
 
