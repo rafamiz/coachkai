@@ -118,6 +118,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    is_food = await ai.classify_intent(text)
+    if not is_food:
+        await update.message.reply_text(
+            "Solo puedo ayudarte con el registro de tus comidas 🍽️\n"
+            "Contame qué comiste o mandame una foto!"
+        )
+        return
+
     await _log_meal_text(update, context, user, text)
 
 

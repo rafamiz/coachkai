@@ -198,6 +198,19 @@ async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_
     return await _ask([{"role": "user", "content": prompt}])
 
 
+async def classify_intent(text: str) -> bool:
+    """Return True if the message is food/meal related."""
+    raw = await _ask(
+        [{"role": "user", "content": f"Message: '{text}'"}],
+        system=(
+            "You are an intent classifier. "
+            "Reply ONLY with 'yes' if the message is about food, meals, drinks, eating, or nutrition. "
+            "Reply ONLY with 'no' for anything else."
+        ),
+    )
+    return raw.strip().lower().startswith("y")
+
+
 async def generate_daily_summary(user: dict, meals: list) -> str:
     if not meals:
         return None
