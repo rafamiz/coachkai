@@ -1,8 +1,6 @@
 import os
 import logging
 from datetime import datetime
-from dotenv import load_dotenv
-load_dotenv(override=False)  # Railway env vars take priority
 
 from telegram import Update
 from telegram.ext import ContextTypes
