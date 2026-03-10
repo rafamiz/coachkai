@@ -15,7 +15,7 @@ def get_client():
     return _client
 
 
-MODEL = "claude-3-5-haiku-20241022"
+MODEL = "claude-haiku-4-5"
 
 SYSTEM_BASE = (
     "Sos un coach de nutrición personal, cálido y alentador. "
