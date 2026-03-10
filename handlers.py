@@ -1,6 +1,8 @@
 import os
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
 
 from telegram import Update
 from telegram.ext import ContextTypes
