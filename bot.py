@@ -42,6 +42,10 @@ async def _post_shutdown(application: Application) -> None:
         logger.info("Web server stopped")
 
 
+async def _error_handler(update, context):
+    logger.error(f"Exception in bot: {context.error}", exc_info=context.error)
+
+
 def main():
     db.init_db()
 
@@ -63,6 +67,8 @@ def main():
     app.add_handler(CommandHandler("reset", handlers.cmd_reset))
     app.add_handler(MessageHandler(filters.PHOTO, handlers.handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
+    
+    app.add_error_handler(_error_handler)
 
     scheduler.start_scheduler(app)
 
