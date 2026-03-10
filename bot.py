@@ -1,0 +1,74 @@
+import logging
+import os
+
+from aiohttp import web as aio_web
+from dotenv import load_dotenv
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
+
+import db
+import handlers
+import scheduler
+import web as web_module
+
+load_dotenv()
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+
+async def _post_init(application: Application) -> None:
+    port = int(os.environ.get("WEB_PORT", "8080"))
+    aiohttp_app = web_module.create_web_app(application.bot)
+    runner = aio_web.AppRunner(aiohttp_app)
+    await runner.setup()
+    site = aio_web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    application.bot_data["web_runner"] = runner
+    logger.info(f"Web server started on port {port}")
+
+
+async def _post_shutdown(application: Application) -> None:
+    runner = application.bot_data.get("web_runner")
+    if runner:
+        await runner.cleanup()
+        logger.info("Web server stopped")
+
+
+def main():
+    db.init_db()
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise ValueError("TELEGRAM_BOT_TOKEN not set in .env")
+
+    app = (
+        Application.builder()
+        .token(token)
+        .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
+        .build()
+    )
+
+    app.add_handler(CommandHandler("start", handlers.cmd_start))
+    app.add_handler(CommandHandler("plan", handlers.cmd_plan))
+    app.add_handler(CommandHandler("stats", handlers.cmd_stats))
+    app.add_handler(CommandHandler("reset", handlers.cmd_reset))
+    app.add_handler(MessageHandler(filters.PHOTO, handlers.handle_photo))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
+
+    scheduler.start_scheduler(app)
+
+    logger.info("NutriBot is running...")
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
