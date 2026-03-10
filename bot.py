@@ -2,7 +2,6 @@ import logging
 import os
 
 from aiohttp import web as aio_web
-from dotenv import load_dotenv
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -14,8 +13,6 @@ import db
 import handlers
 import scheduler
 import web as web_module
-
-load_dotenv()
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
