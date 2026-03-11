@@ -402,7 +402,6 @@ def get_all_eating_schedules():
         SELECT es.*, u.telegram_id
         FROM eating_schedule es
         JOIN users u ON u.id = es.user_id
-        WHERE es.confidence >= 30
     """)
     rows = c.fetchall()
     _release(conn)
