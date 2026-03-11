@@ -109,16 +109,16 @@ async def run_tests():
     # ── 6. Intent classification ─────────────────────────────────────────────
     await send_section("6. Clasificación de intención")
     tests = [
-        ("comí milanesa", True),
-        ("cuántas calorías tiene un huevo?", True),
-        ("como se calcula el camino más corto?", False),
-        ("qué hora es", False),
-        ("me duele la panza", True),
+        ("comí milanesa", "log"),
+        ("cuántas calorías tiene un huevo?", "question"),
+        ("como se calcula el camino más corto?", "other"),
+        ("qué hora es", "other"),
+        ("me duele la panza después de comer", "question"),
     ]
     for msg, expected in tests:
-        result = await ai.classify_intent(msg)
+        result = await ai.classify_message(msg)
         icon = "✅" if result == expected else "❌"
-        await send(f"{icon} '{msg}' → {'nutrición' if result else 'fuera de tema'} (esperado: {'nutrición' if expected else 'fuera'})")
+        await send(f"{icon} '{msg}'\n→ got: {result} | expected: {expected}")
 
     # ── 7. /stats preview ────────────────────────────────────────────────────
     await send_section("7. /stats preview")

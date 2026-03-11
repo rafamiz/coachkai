@@ -25,9 +25,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     url = _onboarding_url(telegram_id)
     await update.message.reply_text(
-        "¡Hola! 👋 Soy tu coach de nutrición personal.\n\n"
-        "Para empezar, completá tu perfil en este link — solo te lleva un minuto:\n\n"
-        f"{url}"
+        "🌿 *Bienvenido a NUTRIMATE*\n_Tu compañero inteligente de nutrición_\n\n"
+        "Para empezar, completá tu perfil — solo tarda un minuto:\n\n"
+        f"{url}",
+        parse_mode="Markdown"
     )
 
 
@@ -37,9 +38,21 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or not user.get("onboarding_complete"):
         await update.message.reply_text("Primero necesito conocerte un poco 😊 Usá /start para empezar.")
         return
-    await update.message.reply_text("Un momento, armando tu plan... 🥗")
+    await update.message.reply_text("Armando tu plan personalizado... 🥗 (en unos segundos te mando el PDF)")
     plan = await ai.generate_meal_plan(user)
     await update.message.reply_text(plan)
+    # Generate and send PDF
+    try:
+        import pdf_generator
+        pdf_bytes = pdf_generator.generate_plan_pdf(user, plan)
+        from io import BytesIO
+        await update.message.reply_document(
+            document=BytesIO(pdf_bytes),
+            filename=f"plan_nutrimate_{user.get('name', 'usuario').lower().replace(' ', '_')}.pdf",
+            caption="📄 Tu plan de alimentación personalizado — NUTRIMATE"
+        )
+    except Exception as e:
+        logger.error(f"PDF generation error: {e}")
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
