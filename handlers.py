@@ -217,6 +217,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = update.message.caption or ""
     analysis = await ai.analyze_meal_photo(photo_path, user)
 
+    # Add photo analysis to conversation history so follow-up questions work
+    detected = analysis.get("detected", "una comida")
+    cal = analysis.get("calories", 0)
+    prot = analysis.get("proteins_g", 0)
+    history = context.user_data.get("history", [])
+    history.append({"role": "user", "content": "[foto de comida enviada]"})
+    history.append({"role": "assistant", "content": f"Analicé la foto: {detected} (~{cal} kcal, {prot}g proteína)"})
+    context.user_data["history"] = history[-8:]
+
     await _save_and_reply_meal(update, user, analysis, caption or analysis.get("detected", ""), photo_path)
 
 

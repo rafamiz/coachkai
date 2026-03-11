@@ -324,8 +324,19 @@ async def answer_nutrition_question(text: str, user: dict, history: list = None)
         f"Peso: {user.get('weight_kg', '?')} kg, Altura: {user.get('height_cm', '?')} cm, "
         f"Objetivo: {goal}, Actividad: {activity}"
     )
+    # Inject today's meals as context
+    import db as _db
+    today_meals = _db.get_today_meals(user.get("telegram_id", 0))
+    meals_context = ""
+    if today_meals:
+        meal_lines = []
+        for m in today_meals:
+            t = m.get("eaten_at", "")[:16]
+            meal_lines.append(f"  - {t} | {m.get('meal_type','?')} | {m.get('description','?')[:50]} | ~{m.get('calories_est',0)} kcal")
+        meals_context = "\nComidas registradas hoy:\n" + "\n".join(meal_lines)
+
     messages = (history or []) + [{"role": "user", "content": text}]
-    return await _ask(messages, system=SYSTEM_BASE + f"\nPerfil del usuario: {profile}\nTenés acceso completo a estos datos y podés usarlos cuando el usuario pregunte sobre su perfil.")
+    return await _ask(messages, system=SYSTEM_BASE + f"\nPerfil del usuario: {profile}\nTenés acceso completo a estos datos y podés usarlos cuando el usuario pregunte sobre su perfil.{meals_context}")
 
 
 async def check_meal_vague(text: str) -> str | None:
