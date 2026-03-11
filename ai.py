@@ -193,20 +193,52 @@ async def onboarding_welcome(name: str) -> str:
     }])
 
 
-async def generate_meal_plan(user: dict) -> str:
+async def generate_meal_plan(user: dict) -> dict:
+    """Returns dict with plan_text and meal_options (breakfasts, lunches, dinners)."""
     profile = (
-        f"Nombre: {user['name']}, Edad: {user['age']} años, "
-        f"Peso: {user['weight_kg']} kg, Altura: {user['height_cm']} cm, "
-        f"Objetivo: {user['goal']}, Nivel de actividad: {user['activity_level']}"
+        f"Nombre: {user.get('name','?')}, Edad: {user.get('age','?')} años, "
+        f"Peso: {user.get('weight_kg','?')} kg, Altura: {user.get('height_cm','?')} cm, "
+        f"Objetivo: {user.get('goal','?')}, Actividad: {user.get('activity_level','?')}"
     )
-    return await _ask([{
+    profile_text = user.get("profile_text", "")
+    if profile_text:
+        profile += f"\n\nPerfil detallado:\n{profile_text[:500]}"
+
+    raw = await _ask([{
         "role": "user",
         "content": (
-            f"Generá un resumen de plan de alimentación personalizado para esta persona:\n{profile}\n\n"
-            "Incluí: calorías diarias aproximadas, distribución de macros, "
-            "3-4 recomendaciones clave. Máximo 200 palabras, usá emojis y formato claro."
+            f"Generá un plan de alimentación personalizado para:\n{profile}\n\n"
+            "Respondé SOLO con JSON válido con esta estructura exacta:\n"
+            "{\n"
+            '  "calories": 2000,\n'
+            '  "protein_g": 150,\n'
+            '  "carbs_g": 200,\n'
+            '  "fat_g": 65,\n'
+            '  "summary": "Resumen breve del plan (2-3 oraciones)",\n'
+            '  "tips": ["tip 1", "tip 2", "tip 3"],\n'
+            '  "breakfasts": ["Opción 1", "Opción 2", "Opción 3"],\n'
+            '  "lunches": ["Opción 1", "Opción 2", "Opción 3"],\n'
+            '  "dinners": ["Opción 1", "Opción 2", "Opción 3"],\n'
+            '  "snacks": ["Opción 1", "Opción 2"]\n'
+            "}\n"
+            "Las opciones deben ser específicas, con porciones aproximadas. Sin texto extra fuera del JSON."
         )
     }])
+
+    import json, re
+    try:
+        # Extract JSON from response
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+    except Exception:
+        pass
+    # Fallback
+    return {
+        "calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0,
+        "summary": raw, "tips": [],
+        "breakfasts": [], "lunches": [], "dinners": [], "snacks": []
+    }
 
 
 PROCESS_SYSTEM = """You are Coach Kai, a warm, direct Argentine nutrition coach.

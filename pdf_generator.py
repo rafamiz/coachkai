@@ -159,36 +159,95 @@ def generate_plan_pdf(user: dict, plan_text: str) -> bytes:
     ]))
     elements.append(profile_table)
 
-    # ── Meal Plan ────────────────────────────────────────────────────────────
-    elements.append(Paragraph("🥗 Plan de Alimentación Personalizado", section_style))
-    elements.append(HRFlowable(width="100%", thickness=1, color=HexColor("#d0ebe8"), spaceAfter=8))
+    # ── Macros summary ───────────────────────────────────────────────────────
+    if isinstance(plan_text, dict):
+        plan = plan_text
+    else:
+        plan = {"summary": plan_text, "calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0,
+                "tips": [], "breakfasts": [], "lunches": [], "dinners": [], "snacks": []}
 
-    # Parse and format the plan text
-    for line in plan_text.split("\n"):
-        line = line.strip()
-        if not line:
-            elements.append(Spacer(1, 4))
-            continue
-        # Bold headers (lines starting with emoji or **)
-        if line.startswith("**") and line.endswith("**"):
-            clean = line.strip("*").strip()
-            elements.append(Paragraph(f"<b>{clean}</b>", ParagraphStyle(
-                "bold", parent=body_style, textColor=DARK, spaceBefore=8,
-            )))
-        elif line.startswith("#"):
-            clean = line.lstrip("#").strip()
-            elements.append(Paragraph(f"<b>{clean}</b>", section_style))
-        elif line.startswith("•") or line.startswith("-"):
-            clean = line.lstrip("•-").strip()
-            elements.append(Paragraph(f"• {clean}", ParagraphStyle(
+    elements.append(Paragraph("📊 Objetivos Diarios", section_style))
+    macro_data = [
+        ["Calorías", f"{plan.get('calories', '—')} kcal",
+         "Proteínas", f"{plan.get('protein_g', '—')} g"],
+        ["Carbohidratos", f"{plan.get('carbs_g', '—')} g",
+         "Grasas", f"{plan.get('fat_g', '—')} g"],
+    ]
+    macro_table = Table(
+        [[Paragraph(str(cell), user_label_style if i % 2 == 0 else ParagraphStyle(
+            "val", parent=body_style, textColor=TEAL, fontName="Helvetica-Bold", fontSize=11
+        )) for i, cell in enumerate(row)] for row in macro_data],
+        colWidths=[3.5*cm, 5.5*cm, 3.5*cm, 5*cm],
+    )
+    macro_table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1), TEAL_LIGHT),
+        ("ROWBACKGROUNDS", (0,0), (-1,-1), [TEAL_LIGHT, white]),
+        ("GRID", (0,0), (-1,-1), 0.5, HexColor("#d0ebe8")),
+        ("PADDING", (0,0), (-1,-1), 8),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+    ]))
+    elements.append(macro_table)
+
+    # ── Summary ──────────────────────────────────────────────────────────────
+    if plan.get("summary"):
+        elements.append(Spacer(1, 8))
+        elements.append(Paragraph(plan["summary"], body_style))
+
+    # ── Tips ─────────────────────────────────────────────────────────────────
+    if plan.get("tips"):
+        elements.append(Paragraph("💡 Recomendaciones clave", section_style))
+        for tip in plan["tips"]:
+            elements.append(Paragraph(f"• {tip}", ParagraphStyle(
                 "bullet", parent=body_style, leftIndent=12,
             )))
-        else:
-            # Render inline bold (**text**)
-            import re
-            formatted = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', line)
-            formatted = re.sub(r'\*(.+?)\*', r'<i>\1</i>', formatted)
-            elements.append(Paragraph(formatted, body_style))
+
+    # ── Meal options table ───────────────────────────────────────────────────
+    breakfasts = plan.get("breakfasts", [])
+    lunches    = plan.get("lunches", [])
+    dinners    = plan.get("dinners", [])
+    snacks     = plan.get("snacks", [])
+
+    if breakfasts or lunches or dinners:
+        elements.append(Paragraph("🍽 Opciones de Comidas", section_style))
+        elements.append(HRFlowable(width="100%", thickness=1, color=HexColor("#d0ebe8"), spaceAfter=6))
+
+        col_style = ParagraphStyle("colhdr", fontName="Helvetica-Bold", fontSize=10,
+                                   textColor=white, alignment=TA_CENTER)
+        cell_style = ParagraphStyle("cell", fontName="Helvetica", fontSize=9,
+                                    textColor=DARK, leading=13)
+
+        max_rows = max(len(breakfasts), len(lunches), len(dinners), 1)
+        table_data = [[
+            Paragraph("☀️ Desayuno", col_style),
+            Paragraph("🥗 Almuerzo", col_style),
+            Paragraph("🌙 Cena", col_style),
+        ]]
+        for i in range(max_rows):
+            row = [
+                Paragraph(breakfasts[i] if i < len(breakfasts) else "—", cell_style),
+                Paragraph(lunches[i]    if i < len(lunches)    else "—", cell_style),
+                Paragraph(dinners[i]    if i < len(dinners)    else "—", cell_style),
+            ]
+            table_data.append(row)
+
+        meal_table = Table(table_data, colWidths=[5.5*cm, 5.5*cm, 5.5*cm])
+        meal_table.setStyle(TableStyle([
+            ("BACKGROUND",    (0,0), (-1,0),  TEAL),
+            ("ROWBACKGROUNDS",(0,1), (-1,-1), [TEAL_LIGHT, white]),
+            ("GRID",          (0,0), (-1,-1), 0.5, HexColor("#d0ebe8")),
+            ("PADDING",       (0,0), (-1,-1), 8),
+            ("TOPPADDING",    (0,0), (-1,0),  10),
+            ("BOTTOMPADDING", (0,0), (-1,0),  10),
+            ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+        ]))
+        elements.append(meal_table)
+
+    if snacks:
+        elements.append(Paragraph("🍎 Colaciones / Snacks", section_style))
+        for s in snacks:
+            elements.append(Paragraph(f"• {s}", ParagraphStyle(
+                "bullet", parent=body_style, leftIndent=12,
+            )))
 
     # ── Footer ────────────────────────────────────────────────────────────────
     elements.append(Spacer(1, 20))
