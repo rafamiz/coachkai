@@ -167,6 +167,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _log_meal_text(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict, text: str):
     await update.message.reply_text("Registrando tu comida... 🍽️")
+    ai.reset_turn_cost()
     analysis = await ai.analyze_meal_text(text, user)
     await _save_and_reply_meal(update, user, analysis, text, None)
 
@@ -207,4 +208,6 @@ async def _save_and_reply_meal(update: Update, user: dict, analysis: dict, descr
             f"{'🎯 Va bien con tu objetivo!' if aligned == 'sí' else '💡 ' + tip if tip else ''}"
         )
 
+    cost = ai.get_turn_cost()
+    response += f"\n\n_💰 ${cost:.5f} USD_"
     await update.message.reply_text(response, parse_mode="Markdown")

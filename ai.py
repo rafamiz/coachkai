@@ -17,6 +17,18 @@ def get_client():
 
 MODEL = "claude-haiku-4-5"
 
+# Cost tracking (Haiku pricing: $0.80/MTok input, $4.00/MTok output)
+_COST_INPUT = 0.80 / 1_000_000
+_COST_OUTPUT = 4.00 / 1_000_000
+_turn_cost: float = 0.0
+
+def reset_turn_cost():
+    global _turn_cost
+    _turn_cost = 0.0
+
+def get_turn_cost() -> float:
+    return _turn_cost
+
 SYSTEM_BASE = (
     "Sos un coach de nutrición personal, cálido y alentador. "
     "Hablás en español rioplatense, usás 'vos' en lugar de 'tú'. "
@@ -27,6 +39,7 @@ SYSTEM_BASE = (
 
 
 async def _ask(messages: list, system: str = SYSTEM_BASE) -> str:
+    global _turn_cost
     try:
         client = get_client()
         resp = await client.messages.create(
@@ -35,6 +48,7 @@ async def _ask(messages: list, system: str = SYSTEM_BASE) -> str:
             system=system,
             messages=messages,
         )
+        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
         return resp.content[0].text.strip()
     except Exception as e:
         import logging
