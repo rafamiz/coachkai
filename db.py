@@ -752,7 +752,7 @@ def get_pending_reminders() -> list:
     """Get all unsent reminders that are due (remind_at <= now)."""
     conn = get_conn()
     c = _cur(conn)
-    if IS_POSTGRES:
+    if _USE_POSTGRES:
         c.execute("SELECT * FROM reminders WHERE sent = FALSE AND remind_at <= NOW() ORDER BY remind_at")
     else:
         c.execute("SELECT * FROM reminders WHERE sent = 0 AND remind_at <= datetime('now') ORDER BY remind_at")
