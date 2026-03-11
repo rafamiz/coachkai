@@ -287,13 +287,19 @@ async def classify_message(text: str, history: list = None) -> str:
     raw = await _ask(
         messages,
         system=(
-            "Sos un clasificador de intención para un bot de nutrición. Tenés acceso al historial de conversación para entender el contexto.\n"
-            "Clasificá el ÚLTIMO mensaje del usuario. Respondé SOLO con una palabra:\n"
-            "'log' — SOLO si el usuario reporta algo que YA comió o está comiendo AHORA (ej: 'comí pasta', 'me tomé un café', 'dale lo como', 'voy a comer eso ahora'). Incluye confirmaciones de que va a comer algo mencionado antes.\n"
-            "'question' — si pregunta qué comer, pide ideas, da ingredientes, consulta nutrición/salud/dieta/peso/ejercicio, o da un detalle sobre cómo preparó algo (ej: 'todo junto', 'hervido', 'con sal').\n"
-            "'other' — si no tiene nada que ver con comida ni salud.\n"
-            "IMPORTANTE: respuestas cortas como 'todo junto', 'hervido', 'sin sal', 'con aceite' en contexto de una conversación sobre comida → 'question'.\n"
-            "Respondé SOLO: log, question, o other."
+            "Sos un clasificador de intención para NUTRIMATE, un bot de nutrición personal.\n"
+            "Clasificá el ÚLTIMO mensaje. En caso de duda, clasificá como 'question'.\n\n"
+            "'log' — el usuario reporta algo que YA comió o está comiendo en este momento\n"
+            "  Ejemplos: 'comí pasta', 'me tomé un café', 'almorcé arroz con pollo'\n\n"
+            "'question' — TODO LO DEMÁS relacionado con el usuario o nutrición:\n"
+            "  - preguntas sobre su perfil ('quien soy', 'cuánto peso', 'cuál es mi objetivo')\n"
+            "  - preguntas sobre qué comer, ingredientes, recetas\n"
+            "  - consultas de salud, ejercicio, dieta\n"
+            "  - respuestas en contexto ('todo junto', 'hervido', 'mediano', 'con sal')\n"
+            "  - saludos o mensajes cortos ('hola', 'gracias', 'ok')\n\n"
+            "'other' — SOLO si claramente no tiene nada que ver con nutrición ni con el usuario\n"
+            "  Ejemplos obvios: preguntas de matemáticas, política, geografía\n\n"
+            "EN CASO DE DUDA → 'question'. Respondé SOLO: log, question, o other."
         ),
     )
     r = raw.strip().lower()
@@ -305,10 +311,21 @@ async def classify_message(text: str, history: list = None) -> str:
 
 
 async def answer_nutrition_question(text: str, user: dict, history: list = None) -> str:
-    """Answer a general nutrition/health question."""
-    profile = f"Objetivo: {user['goal']}, Peso: {user['weight_kg']}kg, Actividad: {user['activity_level']}, Nombre: {user['name']}"
+    """Answer a general nutrition/health question with full user context."""
+    goal_map = {"lose_weight": "bajar de peso", "gain_muscle": "ganar músculo",
+                "maintain": "mantener peso", "eat_healthier": "comer más sano"}
+    activity_map = {"sedentary": "sedentario", "lightly_active": "poco activo",
+                    "light": "poco activo", "moderate": "moderado",
+                    "active": "activo", "very_active": "muy activo"}
+    goal = goal_map.get(user.get("goal", ""), user.get("goal", "no definido"))
+    activity = activity_map.get(user.get("activity_level", ""), user.get("activity_level", "no definido"))
+    profile = (
+        f"Nombre: {user.get('name', '?')}, Edad: {user.get('age', '?')} años, "
+        f"Peso: {user.get('weight_kg', '?')} kg, Altura: {user.get('height_cm', '?')} cm, "
+        f"Objetivo: {goal}, Actividad: {activity}"
+    )
     messages = (history or []) + [{"role": "user", "content": text}]
-    return await _ask(messages, system=SYSTEM_BASE + f"\nPerfil del usuario: {profile}")
+    return await _ask(messages, system=SYSTEM_BASE + f"\nPerfil del usuario: {profile}\nTenés acceso completo a estos datos y podés usarlos cuando el usuario pregunte sobre su perfil.")
 
 
 async def check_meal_vague(text: str) -> str | None:
