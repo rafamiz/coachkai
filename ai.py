@@ -80,7 +80,67 @@ async def generate_meal_plan(user: dict) -> str:
 
 
 async def analyze_meal_text(description: str, user: dict) -> dict:
+    import nutrition as nutr
+
+    # Step 1: Ask Claude to extract food name + portion from the description
+    extraction = await _ask(
+        [{"role": "user", "content": f"Comida: '{description}'\nRespondé SOLO con JSON: {{\"food\": \"nombre del alimento principal\", \"portion\": \"descripción de la porción (ej: 200g, un plato grande, 2 unidades)\"}}"}],
+        system="Sos un extractor de datos de comidas. Respondé solo con JSON, sin explicaciones."
+    )
+    food_name, portion = description, description
+    try:
+        import json, re
+        m = re.search(r'\{.*\}', extraction, re.DOTALL)
+        if m:
+            extracted = json.loads(m.group())
+            food_name = extracted.get("food", description)
+            portion = extracted.get("portion", description)
+    except Exception:
+        pass
+
+    # Step 2: Try Open Food Facts for real nutritional data
+    off_data = await nutr.get_nutrition_for_meal(food_name, portion)
+
     profile = f"Objetivo: {user['goal']}, Actividad: {user['activity_level']}, Peso: {user['weight_kg']}kg"
+
+    if off_data:
+        # Use real data — ask Claude only for meal_type, alignment and tip
+        prompt = (
+            f"El usuario comió: '{description}'\n"
+            f"Perfil: {profile}\n"
+            f"Datos nutricionales reales: {off_data['calories']} kcal, {off_data['proteins_g']}g proteína, {off_data['carbs_g']}g carbos, {off_data['fats_g']}g grasa\n\n"
+            "Respondé SOLO con JSON:\n"
+            '{"meal_type": "lunch", "aligned": "sí", "tip": "..."}'
+        )
+        raw = await _ask([{"role": "user", "content": prompt}])
+        extra = {}
+        try:
+            import json, re
+            m = re.search(r'\{.*\}', raw, re.DOTALL)
+            if m:
+                extra = json.loads(m.group())
+        except Exception:
+            pass
+
+        detected = off_data["food_name"]
+        cal = off_data["calories"]
+        p = off_data["proteins_g"]
+        c = off_data["carbs_g"]
+        f = off_data["fats_g"]
+        source_note = "📊 _datos: Open Food Facts_"
+        return {
+            "detected": detected,
+            "calories": cal,
+            "proteins_g": p,
+            "carbs_g": c,
+            "fats_g": f,
+            "meal_type": extra.get("meal_type", "snack"),
+            "aligned": extra.get("aligned", "parcialmente"),
+            "tip": extra.get("tip", ""),
+            "full_response": f"🍽 {detected} · ~{cal} kcal\n🥩 Proteína: {p}g · 🌾 Carbos: {c}g · 🫒 Grasa: {f}g\n{source_note}",
+        }
+
+    # Fallback: Claude estimation
     prompt = (
         f"El usuario describió su comida: '{description}'\n"
         f"Perfil del usuario: {profile}\n\n"
@@ -92,10 +152,9 @@ async def analyze_meal_text(description: str, user: dict) -> dict:
         "5. Un tip corto y práctico (1 oración máximo)\n"
         "6. Estimación de macros en gramos (proteínas, carbohidratos, grasas)\n\n"
         "El campo 'full_response' debe ser SOLO el resumen nutricional en este formato exacto:\n"
-        "'🍽 [nombre del plato] · ~[X] kcal\\n🥩 Proteína: [X]g · 🌾 Carbos: [X]g · 🫒 Grasa: [X]g'\n"
-        "Sin consejos, sin párrafos, solo los números.\n\n"
+        "'🍽 [nombre del plato] · ~[X] kcal\\n🥩 Proteína: [X]g · 🌾 Carbos: [X]g · 🫒 Grasa: [X]g\\n⚠️ _estimación Claude_'\n\n"
         "Formato de respuesta (JSON):\n"
-        '{"detected": "...", "calories": 450, "proteins_g": 25, "carbs_g": 45, "fats_g": 15, "meal_type": "lunch", "aligned": "sí", "tip": "...", "full_response": "🍽 Pasta con tuco · ~450 kcal\\n🥩 Proteína: 25g · 🌾 Carbos: 60g · 🫒 Grasa: 12g"}'
+        '{"detected": "...", "calories": 450, "proteins_g": 25, "carbs_g": 45, "fats_g": 15, "meal_type": "lunch", "aligned": "sí", "tip": "...", "full_response": "..."}'
     )
     raw = await _ask([{"role": "user", "content": prompt}])
     return _parse_meal_json(raw)
