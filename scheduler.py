@@ -31,6 +31,7 @@ def start_scheduler(app):
     _scheduler.add_job(check_proactive_messages, "interval", minutes=5,  id="proactive_check")
     _scheduler.add_job(analyze_all_patterns,     "interval", hours=1,    id="pattern_analysis")
     _scheduler.add_job(send_daily_summaries,     "cron",     hour=21, minute=0, id="daily_summary")
+    _scheduler.add_job(check_reminders,          "interval", minutes=1,  id="reminders_check")
     _scheduler.start()
     logger.info("Scheduler started")
 
@@ -293,6 +294,23 @@ async def _send_proactive(user, telegram_id, trigger, trigger_info,
 # ---------------------------------------------------------------------------
 # Daily summary at 21:00
 # ---------------------------------------------------------------------------
+
+async def check_reminders():
+    """Send any pending user-requested reminders."""
+    if _bot_app is None:
+        return
+    reminders = db.get_pending_reminders()
+    for r in reminders:
+        try:
+            await _bot_app.bot.send_message(
+                chat_id=r["telegram_id"],
+                text=f"\u23f0 {r['message']}"
+            )
+            db.mark_reminder_sent(r["id"])
+            logger.info(f"[scheduler] Sent reminder {r['id']} to {r['telegram_id']}")
+        except Exception as e:
+            logger.error(f"[scheduler] Error sending reminder {r['id']}: {e}")
+
 
 async def send_daily_summaries():
     if _bot_app is None:

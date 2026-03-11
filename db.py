@@ -182,6 +182,17 @@ def init_db():
         """)
 
         c.execute("""
+            CREATE TABLE IF NOT EXISTS reminders (
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT NOT NULL,
+                remind_at TIMESTAMP NOT NULL,
+                message TEXT NOT NULL,
+                sent BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        c.execute("""
             CREATE TABLE IF NOT EXISTS workout_schedules (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -292,6 +303,17 @@ def init_db():
                 notes TEXT,
                 logged_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER NOT NULL,
+                remind_at TEXT NOT NULL,
+                message TEXT NOT NULL,
+                sent INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -681,3 +703,50 @@ def delete_last_workout(telegram_id: int):
     conn.commit()
     _release(conn)
     return desc
+
+
+# ── Reminders ────────────────────────────────────────────────────────────────
+
+def save_reminder(telegram_id: int, remind_at_iso: str, message: str) -> int:
+    """Save a user reminder. remind_at_iso is ISO format datetime string."""
+    conn = get_conn()
+    c = _cur(conn)
+    if IS_POSTGRES:
+        c.execute(
+            "INSERT INTO reminders (telegram_id, remind_at, message) VALUES (%s, %s, %s) RETURNING id",
+            (telegram_id, remind_at_iso, message)
+        )
+        rid = c.fetchone()[0]
+    else:
+        c.execute(
+            "INSERT INTO reminders (telegram_id, remind_at, message) VALUES (?, ?, ?)",
+            (telegram_id, remind_at_iso, message)
+        )
+        rid = c.lastrowid
+    conn.commit()
+    _release(conn)
+    return rid
+
+
+def get_pending_reminders() -> list:
+    """Get all unsent reminders that are due (remind_at <= now)."""
+    conn = get_conn()
+    c = _cur(conn)
+    if IS_POSTGRES:
+        c.execute("SELECT * FROM reminders WHERE sent = FALSE AND remind_at <= NOW() ORDER BY remind_at")
+    else:
+        c.execute("SELECT * FROM reminders WHERE sent = 0 AND remind_at <= datetime('now') ORDER BY remind_at")
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)
+
+
+def mark_reminder_sent(reminder_id: int):
+    conn = get_conn()
+    c = _cur(conn)
+    if IS_POSTGRES:
+        c.execute("UPDATE reminders SET sent = TRUE WHERE id = %s", (reminder_id,))
+    else:
+        c.execute("UPDATE reminders SET sent = 1 WHERE id = ?", (reminder_id,))
+    conn.commit()
+    _release(conn)

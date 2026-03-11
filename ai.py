@@ -269,6 +269,11 @@ MEAL DELETION (use delete_meal tool):
 - Match the meal by description and time from TODAY'S CONTEXT (each meal has an [id:X])
 - If there are clear duplicates (same description close in time), delete the extra ones
 
+REMINDERS (use set_reminder tool):
+- When the user asks to be reminded at a specific time ("avisame a las X", "recordame a las X"), call set_reminder
+- Use the time they said in HH:MM 24h format (Argentina timezone)
+- Set a short, friendly message relevant to what they asked
+
 PATTERN DETECTION & MEMORY (use update_user_identity):
 - Actively scan the conversation for recurring patterns: same meals on certain days, consistent workout times, food preferences that repeat
 - When the user says "recordá que...", "siempre como...", "los lunes voy al gym", etc. → update identity immediately
@@ -352,6 +357,29 @@ UPDATE_IDENTITY_TOOL = {
             "activity_level": {"type": "string",  "enum": ["sedentary", "lightly_active", "active", "very_active"]}
         },
         "required": ["identity_markdown", "reason"]
+    }
+}
+
+SET_REMINDER_TOOL = {
+    "name": "set_reminder",
+    "description": (
+        "Set a reminder for the user. Use when they say things like 'avisame a las X', "
+        "'recordame a las X', 'mandame un mensaje a las X'. "
+        "The reminder will be sent as a Telegram message at the specified time."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "time_str": {
+                "type": "string",
+                "description": "Time as HH:MM (24h format, Argentina time). E.g. '16:51'"
+            },
+            "message": {
+                "type": "string",
+                "description": "The reminder message to send the user. Short and friendly."
+            }
+        },
+        "required": ["time_str", "message"]
     }
 }
 
@@ -505,7 +533,7 @@ async def process_message(
             model=MODEL,
             max_tokens=600,
             system=system,
-            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL],
+            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL, SET_REMINDER_TOOL],
             messages=messages,
         )
         _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
@@ -522,6 +550,8 @@ async def process_message(
                 return {"type": "identity_update", "update": block.input, "reply": text_reply}
             if block.name == "delete_meal":
                 return {"type": "delete_meal", "meal_ids": block.input.get("meal_ids", []), "reply": text_reply}
+            if block.name == "set_reminder":
+                return {"type": "set_reminder", "time_str": block.input.get("time_str", ""), "message": block.input.get("message", ""), "reply": text_reply}
 
         reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
         return {"type": "text", "content": reply.strip()}

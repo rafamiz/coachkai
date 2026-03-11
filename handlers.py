@@ -686,6 +686,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+    elif result["type"] == "set_reminder":
+        from datetime import datetime, date
+        import pytz
+        time_str = result.get("time_str", "")
+        message = result.get("message", "")
+        try:
+            tz = pytz.timezone("America/Argentina/Buenos_Aires")
+            now = datetime.now(tz)
+            h, m = map(int, time_str.split(":"))
+            remind_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if remind_dt <= now:
+                from datetime import timedelta
+                remind_dt += timedelta(days=1)
+            db.save_reminder(telegram_id, remind_dt.isoformat(), message)
+            reply = result.get("reply") or f"\u23f0 Listo, te aviso a las {time_str}."
+        except Exception as e:
+            logger.error(f"Reminder error: {e}")
+            reply = "No pude configurar el recordatorio. Intent\u00e1 de nuevo."
+        history = history + [{"role": "assistant", "content": reply}]
+        context.user_data["history"] = history[-100:]
+        await update.message.reply_text(reply)
+
     elif result["type"] == "delete_meal":
         meal_ids = result.get("meal_ids", [])
         deleted = 0
