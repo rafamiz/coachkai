@@ -68,12 +68,34 @@ def update_all_schedules():
             update_eating_schedule(user["id"], meal_type)
 
 
+DEFAULT_SCHEDULES = {
+    "breakfast": (8, 30),
+    "lunch":     (12, 30),
+    "dinner":    (20, 30),
+    "snack":     (16, 0),
+}
+
+
+def seed_default_schedules(user_id: int):
+    """Insert default meal times for a new user (used until real history builds up)."""
+    for meal_type, (hour, minute) in DEFAULT_SCHEDULES.items():
+        db.upsert_eating_schedule(user_id, meal_type, hour, minute, confidence=0, sample_count=0)
+
+
 async def check_and_send_followups():
     if _bot_app is None:
         return
 
     now = datetime.now(ART)
     current_minutes = now.hour * 60 + now.minute
+
+    # Seed defaults for users with no schedule yet
+    users = db.get_all_users()
+    existing_user_ids = {s["user_id"] for s in db.get_all_eating_schedules()}
+    for user in users:
+        if user["id"] not in existing_user_ids and user.get("onboarding_complete"):
+            seed_default_schedules(user["id"])
+
     schedules = db.get_all_eating_schedules()
 
     for sched in schedules:
