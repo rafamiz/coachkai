@@ -1,5 +1,5 @@
 """
-pdf_generator.py — Generate branded NUTRIMATE meal plan PDFs.
+pdf_generator.py — Generate branded Coach Kai meal plan PDFs.
 Uses reportlab (pure Python, no system deps needed).
 """
 from io import BytesIO
@@ -18,7 +18,7 @@ try:
 except ImportError:
     REPORTLAB_AVAILABLE = False
 
-# NUTRIMATE brand colors
+# Coach Kai brand colors
 TEAL = HexColor("#2d9d8f") if REPORTLAB_AVAILABLE else None
 TEAL_LIGHT = HexColor("#e8f5f3") if REPORTLAB_AVAILABLE else None
 DARK = HexColor("#2c3e50") if REPORTLAB_AVAILABLE else None
@@ -43,7 +43,7 @@ ACTIVITY_LABELS = {
 
 def generate_plan_pdf(user: dict, plan_text: str) -> bytes:
     """
-    Generate a branded NUTRIMATE PDF with the meal plan.
+    Generate a branded Coach Kai PDF with the meal plan.
     Returns PDF as bytes.
     """
     if not REPORTLAB_AVAILABLE:
@@ -119,7 +119,7 @@ def generate_plan_pdf(user: dict, plan_text: str) -> bytes:
     # ── Header ────────────────────────────────────────────────────────────────
     # Logo area (text-based since no image embedding needed)
     header_data = [[
-        Paragraph("🌿 NUTRIMATE", title_style),
+        Paragraph("🌿 Coach Kai", title_style),
         Paragraph(date.today().strftime("%-d de %B, %Y") if hasattr(date.today(), "strftime") else str(date.today()), small_style),
     ]]
     header_table = Table(header_data, colWidths=[13*cm, 4*cm])
@@ -195,7 +195,7 @@ def generate_plan_pdf(user: dict, plan_text: str) -> bytes:
     elements.append(HRFlowable(width="100%", thickness=1, color=HexColor("#d0ebe8")))
     elements.append(Spacer(1, 6))
     elements.append(Paragraph(
-        "Este plan fue generado por NUTRIMATE · No reemplaza la consulta con un profesional de la salud.",
+        "Este plan fue generado por Coach Kai · No reemplaza la consulta con un profesional de la salud.",
         ParagraphStyle("footer", parent=small_style, alignment=TA_CENTER, fontSize=8, textColor=GRAY)
     ))
 

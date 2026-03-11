@@ -91,7 +91,9 @@ def init_db():
                 goal TEXT,
                 activity_level TEXT,
                 created_at TIMESTAMP DEFAULT NOW(),
-                onboarding_complete INTEGER DEFAULT 0
+                onboarding_complete INTEGER DEFAULT 0,
+                profile_text TEXT,
+                onboarding_history TEXT
             )
         """)
 
@@ -118,6 +120,13 @@ def init_db():
         for col, coltype in [("proteins_g", "REAL"), ("carbs_g", "REAL"), ("fats_g", "REAL")]:
             try:
                 c.execute(f"ALTER TABLE meals ADD COLUMN {col} {coltype} DEFAULT 0")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
+        for col in ["profile_text", "onboarding_history"]:
+            try:
+                c.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
                 conn.commit()
             except Exception:
                 conn.rollback()
@@ -155,6 +164,39 @@ def init_db():
             )
         """)
 
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS workouts (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                telegram_id BIGINT NOT NULL,
+                workout_type TEXT,
+                description TEXT,
+                duration_min INTEGER,
+                calories_burned INTEGER,
+                intensity TEXT,
+                distance_km REAL,
+                notes TEXT,
+                logged_at TIMESTAMP DEFAULT NOW(),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS workout_schedules (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                workout_type TEXT NOT NULL,
+                days_of_week TEXT DEFAULT '',
+                avg_hour REAL,
+                avg_minute REAL,
+                avg_duration_min INTEGER DEFAULT 60,
+                confidence INTEGER DEFAULT 0,
+                sample_count INTEGER DEFAULT 0,
+                UNIQUE(user_id, workout_type),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+
     else:
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -167,7 +209,9 @@ def init_db():
                 goal TEXT,
                 activity_level TEXT,
                 created_at TEXT DEFAULT (datetime('now')),
-                onboarding_complete INTEGER DEFAULT 0
+                onboarding_complete INTEGER DEFAULT 0,
+                profile_text TEXT,
+                onboarding_history TEXT
             )
         """)
 
@@ -192,6 +236,12 @@ def init_db():
         for col, coltype in [("proteins_g", "REAL"), ("carbs_g", "REAL"), ("fats_g", "REAL")]:
             try:
                 c.execute(f"ALTER TABLE meals ADD COLUMN {col} {coltype} DEFAULT 0")
+            except Exception:
+                pass
+
+        for col in ["profile_text", "onboarding_history"]:
+            try:
+                c.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
             except Exception:
                 pass
 
@@ -225,6 +275,39 @@ def init_db():
                 token TEXT PRIMARY KEY,
                 telegram_id INTEGER NOT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS workouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                telegram_id INTEGER NOT NULL,
+                workout_type TEXT,
+                description TEXT,
+                duration_min INTEGER,
+                calories_burned INTEGER,
+                intensity TEXT,
+                distance_km REAL,
+                notes TEXT,
+                logged_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS workout_schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                workout_type TEXT NOT NULL,
+                days_of_week TEXT DEFAULT '',
+                avg_hour REAL,
+                avg_minute REAL,
+                avg_duration_min INTEGER DEFAULT 60,
+                confidence INTEGER DEFAULT 0,
+                sample_count INTEGER DEFAULT 0,
+                UNIQUE(user_id, workout_type),
+                FOREIGN KEY (user_id) REFERENCES users(id)
             )
         """)
 
@@ -331,20 +414,6 @@ def get_today_meals(telegram_id: int):
     return _rows(rows)
 
 
-def delete_today_meals(telegram_id: int) -> int:
-    """Delete all meals for today for a user. Returns count deleted."""
-    conn = get_conn()
-    c = _cur(conn)
-    date_frag, date_val = _today_clause("eaten_at")
-    c.execute(_q(f"SELECT COUNT(*) FROM meals WHERE telegram_id = ? AND {date_frag}"), (telegram_id, date_val))
-    row = c.fetchone()
-    count = list(dict(row).values())[0] if row else 0
-    c.execute(_q(f"DELETE FROM meals WHERE telegram_id = ? AND {date_frag}"), (telegram_id, date_val))
-    conn.commit()
-    _release(conn)
-    return count
-
-
 def delete_last_meal(telegram_id: int) -> str | None:
     """Delete the most recent meal for a user. Returns description or None."""
     conn = get_conn()
@@ -445,3 +514,159 @@ def already_sent_followup_today(user_id: int, ftype: str, meal_type: str = None)
     row = c.fetchone()
     _release(conn)
     return row is not None
+
+
+# --- User identity ---
+
+def save_profile_text(telegram_id: int, profile_text: str):
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("UPDATE users SET profile_text = ? WHERE telegram_id = ?"), (profile_text, telegram_id))
+    conn.commit()
+    _release(conn)
+
+
+def save_onboarding_history(telegram_id: int, history: list):
+    import json
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("UPDATE users SET onboarding_history = ? WHERE telegram_id = ?"),
+              (json.dumps(history), telegram_id))
+    conn.commit()
+    _release(conn)
+
+
+def get_onboarding_history(telegram_id: int) -> list:
+    import json
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT onboarding_history FROM users WHERE telegram_id = ?"), (telegram_id,))
+    row = c.fetchone()
+    _release(conn)
+    if not row:
+        return []
+    raw = dict(row).get("onboarding_history")
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except Exception:
+        return []
+
+
+# --- Workouts ---
+
+def add_workout(user_id: int, telegram_id: int, workout_type: str, description: str,
+                duration_min: int, calories_burned: int, intensity: str,
+                distance_km: float = None, notes: str = None):
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("""
+        INSERT INTO workouts (user_id, telegram_id, workout_type, description,
+                              duration_min, calories_burned, intensity, distance_km, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """), (user_id, telegram_id, workout_type, description,
+           duration_min, calories_burned, intensity, distance_km, notes))
+    conn.commit()
+    _release(conn)
+
+
+def get_today_workouts(telegram_id: int) -> list:
+    conn = get_conn()
+    c = _cur(conn)
+    date_frag, date_val = _today_clause("logged_at")
+    c.execute(
+        _q(f"SELECT * FROM workouts WHERE telegram_id = ? AND {date_frag} ORDER BY logged_at ASC"),
+        (telegram_id, date_val)
+    )
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)
+
+
+def get_recent_workouts(telegram_id: int, limit: int = 20) -> list:
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("""
+        SELECT * FROM workouts WHERE telegram_id = ?
+        ORDER BY logged_at DESC LIMIT ?
+    """), (telegram_id, limit))
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)
+
+
+def get_workouts_by_type(user_id: int, workout_type: str, limit: int = 20) -> list:
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("""
+        SELECT * FROM workouts WHERE user_id = ? AND workout_type = ?
+        ORDER BY logged_at DESC LIMIT ?
+    """), (user_id, workout_type, limit))
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)
+
+
+def upsert_workout_schedule(user_id: int, workout_type: str, days_of_week: str,
+                            avg_hour: float, avg_minute: float,
+                            avg_duration_min: int, confidence: int, sample_count: int):
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("""
+        INSERT INTO workout_schedules
+            (user_id, workout_type, days_of_week, avg_hour, avg_minute, avg_duration_min, confidence, sample_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, workout_type) DO UPDATE SET
+            days_of_week = excluded.days_of_week,
+            avg_hour = excluded.avg_hour,
+            avg_minute = excluded.avg_minute,
+            avg_duration_min = excluded.avg_duration_min,
+            confidence = excluded.confidence,
+            sample_count = excluded.sample_count
+    """), (user_id, workout_type, days_of_week, avg_hour, avg_minute,
+           avg_duration_min, confidence, sample_count))
+    conn.commit()
+    _release(conn)
+
+
+def get_workout_schedules(user_id: int) -> list:
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT * FROM workout_schedules WHERE user_id = ?"), (user_id,))
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)
+
+
+def get_all_workout_schedules() -> list:
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute("""
+        SELECT ws.*, u.telegram_id
+        FROM workout_schedules ws
+        JOIN users u ON u.id = ws.user_id
+        WHERE ws.confidence >= 30
+    """)
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)
+
+
+def delete_last_workout(telegram_id: int):
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("""
+        SELECT id, description FROM workouts WHERE telegram_id = ?
+        ORDER BY logged_at DESC LIMIT 1
+    """), (telegram_id,))
+    row = c.fetchone()
+    if not row:
+        _release(conn)
+        return None
+    wid = dict(row)["id"]
+    desc = dict(row)["description"]
+    c.execute(_q("DELETE FROM workouts WHERE id = ?"), (wid,))
+    conn.commit()
+    _release(conn)
+    return desc
