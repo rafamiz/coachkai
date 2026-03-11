@@ -118,12 +118,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # If we're waiting for clarification on a vague meal, combine and log
+    pending = context.user_data.get("pending_meal_text")
+    if pending:
+        context.user_data.pop("pending_meal_text", None)
+        combined = f"{pending} — {text}"
+        await _log_meal_text(update, context, user, combined)
+        return
+
     is_food = await ai.classify_intent(text)
     if not is_food:
         await update.message.reply_text(
             "Solo puedo ayudarte con el registro de tus comidas 🍽️\n"
             "Contame qué comiste o mandame una foto!"
         )
+        return
+
+    # Check if description is too vague (e.g. "comí" with no food specified)
+    follow_up_question = await ai.check_meal_vague(text)
+    if follow_up_question:
+        context.user_data["pending_meal_text"] = text
+        await update.message.reply_text(follow_up_question)
         return
 
     await _log_meal_text(update, context, user, text)

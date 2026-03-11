@@ -20,8 +20,9 @@ MODEL = "claude-haiku-4-5"
 SYSTEM_BASE = (
     "Sos un coach de nutrición personal, cálido y alentador. "
     "Hablás en español rioplatense, usás 'vos' en lugar de 'tú'. "
-    "Tus respuestas son cortas, prácticas y usan emojis de forma natural. "
-    "Nunca sos sermoneador ni pesado."
+    "Tus respuestas son MUY cortas: máximo 2-3 líneas, sin explicaciones largas. "
+    "Usás emojis de forma natural. Nunca sos sermoneador ni pesado. "
+    "Conversacional y directo al punto."
 )
 
 
@@ -196,6 +197,23 @@ async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_
         "Agregá 1-2 emojis relevantes."
     )
     return await _ask([{"role": "user", "content": prompt}])
+
+
+async def check_meal_vague(text: str) -> str | None:
+    """Return a follow-up question if the meal description is too vague, else None."""
+    raw = await _ask(
+        [{"role": "user", "content": f"Descripción de comida: '{text}'"}],
+        system=(
+            "Sos un validador de descripciones de comida. "
+            "Si la descripción NO especifica qué alimento se comió "
+            "(por ejemplo: 'comí', 'almorcé', 'desayuné', 'cené' sin mencionar qué), "
+            "respondé SOLO con una pregunta corta y amigable en español rioplatense preguntando qué comió. "
+            "Si la descripción menciona algún alimento concreto, respondé SOLO con la palabra 'OK'."
+        ),
+    )
+    if raw.strip().upper() == "OK":
+        return None
+    return raw.strip()
 
 
 async def classify_intent(text: str) -> bool:
