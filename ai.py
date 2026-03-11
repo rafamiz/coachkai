@@ -75,10 +75,13 @@ async def analyze_meal_text(description: str, user: dict) -> dict:
         "2. Estimación de calorías (número solo)\n"
         "3. Tipo de comida (breakfast/lunch/dinner/snack)\n"
         "4. Si se alinea con su objetivo (sí/no/parcialmente)\n"
-        "5. Un tip corto y práctico\n"
+        "5. Un tip corto y práctico (1 oración máximo)\n"
         "6. Estimación de macros en gramos (proteínas, carbohidratos, grasas)\n\n"
+        "El campo 'full_response' debe ser SOLO el resumen nutricional en este formato exacto:\n"
+        "'🍽 [nombre del plato] · ~[X] kcal\\n🥩 Proteína: [X]g · 🌾 Carbos: [X]g · 🫒 Grasa: [X]g'\n"
+        "Sin consejos, sin párrafos, solo los números.\n\n"
         "Formato de respuesta (JSON):\n"
-        '{"detected": "...", "calories": 450, "proteins_g": 25, "carbs_g": 45, "fats_g": 15, "meal_type": "lunch", "aligned": "sí", "tip": "...", "full_response": "mensaje amigable al usuario"}'
+        '{"detected": "...", "calories": 450, "proteins_g": 25, "carbs_g": 45, "fats_g": 15, "meal_type": "lunch", "aligned": "sí", "tip": "...", "full_response": "🍽 Pasta con tuco · ~450 kcal\\n🥩 Proteína: 25g · 🌾 Carbos: 60g · 🫒 Grasa: 12g"}'
     )
     raw = await _ask([{"role": "user", "content": prompt}])
     return _parse_meal_json(raw)
@@ -200,15 +203,16 @@ async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_
 
 
 async def check_meal_vague(text: str) -> str | None:
-    """Return a follow-up question if the meal description is too vague, else None."""
+    """Return a follow-up question if the meal description needs more detail, else None."""
     raw = await _ask(
         [{"role": "user", "content": f"Descripción de comida: '{text}'"}],
         system=(
             "Sos un validador de descripciones de comida. "
-            "Si la descripción NO especifica qué alimento se comió "
-            "(por ejemplo: 'comí', 'almorcé', 'desayuné', 'cené' sin mencionar qué), "
-            "respondé SOLO con una pregunta corta y amigable en español rioplatense preguntando qué comió. "
-            "Si la descripción menciona algún alimento concreto, respondé SOLO con la palabra 'OK'."
+            "Para poder estimar calorías correctamente, la descripción necesita mencionar TANTO el alimento COMO la cantidad aproximada. "
+            "Si falta el alimento (ej: 'comí', 'almorcé' sin decir qué) → preguntá qué comió. "
+            "Si tiene el alimento pero falta la cantidad (ej: 'comí pasta', 'comí arroz') → preguntá la cantidad aproximada (ej: '¿Cuánto aprox? ¿Un plato chico, mediano o grande?'). "
+            "Si tiene AMBOS (alimento + cantidad aproximada, ej: 'comí un plato grande de pasta con tuco') → respondé SOLO con 'OK'. "
+            "Hacé UNA sola pregunta corta, en español rioplatense."
         ),
     )
     if raw.strip().upper() == "OK":
