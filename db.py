@@ -331,6 +331,28 @@ def get_today_meals(telegram_id: int):
     return _rows(rows)
 
 
+def delete_last_meal(telegram_id: int) -> str | None:
+    """Delete the most recent meal for a user. Returns description or None."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("""
+        SELECT id, description FROM meals
+        WHERE telegram_id = ?
+        ORDER BY eaten_at DESC
+        LIMIT 1
+    """), (telegram_id,))
+    row = c.fetchone()
+    if not row:
+        _release(conn)
+        return None
+    meal_id = dict(row)["id"]
+    description = dict(row)["description"]
+    c.execute(_q("DELETE FROM meals WHERE id = ?"), (meal_id,))
+    conn.commit()
+    _release(conn)
+    return description
+
+
 def get_meals_by_type(user_id: int, meal_type: str, limit: int = 20):
     conn = get_conn()
     c = _cur(conn)

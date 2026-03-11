@@ -209,5 +209,61 @@ async def _save_and_reply_meal(update: Update, user: dict, analysis: dict, descr
         )
 
     cost = ai.get_turn_cost()
-    response += f"\n\n_💰 ${cost:.5f} USD_"
-    await update.message.reply_text(response, parse_mode="Markdown")
+    cost_line = f"\n\n_💰 ${cost:.5f} USD_"
+    try:
+        await update.message.reply_text(response + cost_line, parse_mode="Markdown")
+    except Exception:
+        # Fallback sin markdown si hay caracteres especiales
+        await update.message.reply_text(response.replace("*", "").replace("_", "") + f"\n\n💰 ${cost:.5f} USD")
+
+
+async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🥗 *NutriBot — Comandos disponibles*\n\n"
+        "📝 *Registrar comida:* mandá lo que comiste en texto o foto\n"
+        "   _Ej: 'comí 200g de pollo con ensalada'_\n\n"
+        "/plan — Ver tu plan de alimentación personalizado\n"
+        "/stats — Ver estadísticas del día\n"
+        "/resumen — Gráfico nutricional del día\n"
+        "/perfil — Ver tu perfil actual\n"
+        "/borrar — Eliminar la última comida registrada\n"
+        "/reset — Reiniciar tu perfil desde cero\n"
+        "/ayuda — Mostrar este menú",
+        parse_mode="Markdown"
+    )
+
+
+async def cmd_perfil(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    user = db.get_user(telegram_id)
+    if not user or not user.get("onboarding_complete"):
+        await update.message.reply_text("Todavía no configuraste tu perfil. Usá /start para empezar.")
+        return
+
+    goal_map = {"lose_weight": "Bajar de peso", "gain_muscle": "Ganar músculo", "maintain": "Mantener peso", "improve_health": "Mejorar salud"}
+    activity_map = {"sedentary": "Sedentario", "light": "Actividad leve", "moderate": "Moderado", "active": "Activo", "very_active": "Muy activo"}
+
+    await update.message.reply_text(
+        f"👤 *Tu perfil*\n\n"
+        f"Nombre: {user.get('name', '?')}\n"
+        f"Edad: {user.get('age', '?')} años\n"
+        f"Peso: {user.get('weight_kg', '?')} kg\n"
+        f"Altura: {user.get('height_cm', '?')} cm\n"
+        f"Objetivo: {goal_map.get(user.get('goal', ''), user.get('goal', '?'))}\n"
+        f"Actividad: {activity_map.get(user.get('activity_level', ''), user.get('activity_level', '?'))}\n\n"
+        "_Para modificar tu perfil usá /reset_",
+        parse_mode="Markdown"
+    )
+
+
+async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    user = db.get_user(telegram_id)
+    if not user or not user.get("onboarding_complete"):
+        await update.message.reply_text("Primero configurá tu perfil con /start.")
+        return
+    deleted = db.delete_last_meal(telegram_id)
+    if deleted:
+        await update.message.reply_text(f"🗑 Eliminé tu última comida registrada: _{deleted}_", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("No encontré comidas registradas para eliminar.")

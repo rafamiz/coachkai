@@ -22,7 +22,7 @@ async def lookup_food(query: str) -> dict | None:
         "lang": "es",
     }
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(OFF_SEARCH_URL, params=params)
             data = resp.json()
     except Exception:
