@@ -659,7 +659,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             history = history + [{"role": "assistant", "content": result["reply"]}]
 
 
-        context.user_data["history"] = history[-50:]
+        context.user_data["history"] = history[-100:]
 
 
         await _save_and_reply_meal(update, user, result["meal"])
@@ -677,7 +677,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             history = history + [{"role": "assistant", "content": result["reply"]}]
 
 
-        context.user_data["history"] = history[-50:]
+        context.user_data["history"] = history[-100:]
 
 
         await _save_and_reply_workout(update, user, result["workout"])
@@ -697,7 +697,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else "No encontré esa comida para eliminar."
         )
         history = history + [{"role": "assistant", "content": reply}]
-        context.user_data["history"] = history[-50:]
+        context.user_data["history"] = history[-100:]
         await update.message.reply_text(reply)
 
     elif result["type"] == "identity_update":
@@ -730,7 +730,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         history = history + [{"role": "assistant", "content": reply}]
 
 
-        context.user_data["history"] = history[-50:]
+        context.user_data["history"] = history[-100:]
 
 
         await update.message.reply_text(reply)
@@ -748,7 +748,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         history = history + [{"role": "assistant", "content": response}]
 
 
-        context.user_data["history"] = history[-50:]
+        context.user_data["history"] = history[-100:]
 
 
         await update.message.reply_text(response)
@@ -856,7 +856,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             history = history + [{"role": "assistant", "content": result["reply"]}]
 
 
-        context.user_data["history"] = history[-50:]
+        context.user_data["history"] = history[-100:]
 
 
         await _save_and_reply_meal(update, user, meal, photo_path=photo_path)
@@ -871,7 +871,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         history = history + [{"role": "assistant", "content": response}]
 
 
-        context.user_data["history"] = history[-50:]
+        context.user_data["history"] = history[-100:]
 
 
         await update.message.reply_text(response)

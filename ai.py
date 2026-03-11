@@ -269,6 +269,11 @@ MEAL DELETION (use delete_meal tool):
 - Match the meal by description and time from TODAY'S CONTEXT (each meal has an [id:X])
 - If there are clear duplicates (same description close in time), delete the extra ones
 
+PATTERN DETECTION & MEMORY (use update_user_identity):
+- Actively scan the conversation for recurring patterns: same meals on certain days, consistent workout times, food preferences that repeat
+- When the user says "recordá que...", "siempre como...", "los lunes voy al gym", etc. → update identity immediately
+- Proactively update identity when you detect something consistent across multiple messages
+
 QUESTIONS: answer directly and briefly, using profile context when relevant.
 OFF-TOPIC: politely redirect to nutrition/food."""
 
@@ -324,21 +329,23 @@ LOG_WORKOUT_TOOL = {
 UPDATE_IDENTITY_TOOL = {
     "name": "update_user_identity",
     "description": (
-        "Update the user's identity profile when you learn new significant information about them. "
-        "Use this when the user reveals: a weight change, a new sport or training routine, "
-        "a change in goals, job change, new dietary restriction, or any other meaningful update. "
-        "Do NOT call this for minor or one-off things."
+        "Update the user's identity profile. Use proactively whenever you learn something meaningful: "
+        "weight change, new routine/sport, goal change, dietary restriction, job change, food preference, "
+        "eating schedule, or anything the user explicitly asks you to remember. "
+        "Also call when you detect recurring patterns in the chat (e.g. always trains Tue/Thu, "
+        "always skips breakfast, consistently eats milanesa on Fridays). "
+        "Update the identity to reflect the complete, current picture of the user."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "identity_markdown": {
                 "type": "string",
-                "description": "The complete updated profile in markdown. Include all previous info plus the new update."
+                "description": "Complete updated profile in markdown, third person. Include ALL previous info plus new updates. Minimum 100 words."
             },
             "reason": {
                 "type": "string",
-                "description": "Brief reason for the update (e.g. 'User started training padel regularly')"
+                "description": "Brief reason (e.g. 'User asked to remember preference', 'Detected weekly padel pattern')"
             },
             "weight_kg":      {"type": "number",  "description": "Updated weight if changed"},
             "goal":           {"type": "string",  "enum": ["lose_weight", "gain_muscle", "maintain", "eat_healthier"]},
