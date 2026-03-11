@@ -414,6 +414,17 @@ def get_today_meals(telegram_id: int):
     return _rows(rows)
 
 
+def delete_meal_by_id(telegram_id: int, meal_id: int) -> bool:
+    """Delete a specific meal by ID, only if it belongs to this user."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("DELETE FROM meals WHERE id = ? AND telegram_id = ?"), (meal_id, telegram_id))
+    deleted = c.rowcount > 0
+    conn.commit()
+    _release(conn)
+    return deleted
+
+
 def delete_last_meal(telegram_id: int) -> str | None:
     """Delete the most recent meal for a user. Returns description or None."""
     conn = get_conn()

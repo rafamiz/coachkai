@@ -264,6 +264,11 @@ MEAL RECOMMENDATIONS (text response, no tool):
 - If you need to know cook vs order, or what ingredients they have, ask first
 - Be actionable and concrete — not generic nutrition advice
 
+MEAL DELETION (use delete_meal tool):
+- When the user says a meal was duplicated, wrong, or asks to delete/remove a meal, use delete_meal
+- Match the meal by description and time from TODAY'S CONTEXT (each meal has an [id:X])
+- If there are clear duplicates (same description close in time), delete the extra ones
+
 QUESTIONS: answer directly and briefly, using profile context when relevant.
 OFF-TOPIC: politely redirect to nutrition/food."""
 
@@ -340,6 +345,30 @@ UPDATE_IDENTITY_TOOL = {
             "activity_level": {"type": "string",  "enum": ["sedentary", "lightly_active", "active", "very_active"]}
         },
         "required": ["identity_markdown", "reason"]
+    }
+}
+
+DELETE_MEAL_TOOL = {
+    "name": "delete_meal",
+    "description": (
+        "Delete one or more meals from today's log. Use when the user says a meal was duplicated, "
+        "registered by mistake, or asks to remove a specific meal. "
+        "Match against the meal_id values shown in TODAY'S CONTEXT."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "meal_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "List of meal IDs to delete (from TODAY'S CONTEXT)"
+            },
+            "reason": {
+                "type": "string",
+                "description": "Brief reason: 'duplicate', 'mistake', 'user_request'"
+            }
+        },
+        "required": ["meal_ids", "reason"]
     }
 }
 
@@ -421,7 +450,7 @@ async def process_message(
     meal_lines = []
     for m in today_meals:
         t = (m.get("eaten_at") or "")[:16]
-        meal_lines.append(f"  {t} | {m.get('meal_type','?')} | {(m.get('description') or '')[:45]} | ~{m.get('calories_est',0)} kcal")
+        meal_lines.append(f"  [id:{m.get('id','?')}] {t} | {m.get('meal_type','?')} | {(m.get('description') or '')[:45]} | ~{m.get('calories_est',0)} kcal")
 
     # Workout lines
     workout_lines = []
@@ -469,7 +498,7 @@ async def process_message(
             model=MODEL,
             max_tokens=600,
             system=system,
-            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL],
+            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL],
             messages=messages,
         )
         _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
@@ -484,6 +513,8 @@ async def process_message(
                 return {"type": "workout", "workout": block.input, "reply": text_reply}
             if block.name == "update_user_identity":
                 return {"type": "identity_update", "update": block.input, "reply": text_reply}
+            if block.name == "delete_meal":
+                return {"type": "delete_meal", "meal_ids": block.input.get("meal_ids", []), "reply": text_reply}
 
         reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
         return {"type": "text", "content": reply.strip()}
