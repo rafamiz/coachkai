@@ -199,6 +199,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _log_meal_text(update, context, user, text)
 
 
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    user = db.get_user(telegram_id)
+    if not user or not user.get("onboarding_complete"):
+        await update.message.reply_text("Primero configurá tu perfil con /start 😊")
+        return
+
+    import transcriber
+    import os
+
+    # Check if Whisper is configured
+    if not os.environ.get("OPENAI_API_KEY"):
+        await update.message.reply_text("🎤 Recibí tu audio, pero todavía no tengo configurado el servicio de transcripción. Por ahora escribime lo que querés decir.")
+        return
+
+    await update.message.reply_text("🎤 Escuchando...")
+
+    voice = update.message.voice or update.message.audio
+    file = await context.bot.get_file(voice.file_id)
+    os.makedirs("audio", exist_ok=True)
+    audio_path = f"audio/{telegram_id}_{voice.file_id}.ogg"
+    await file.download_to_drive(audio_path)
+
+    text = await transcriber.transcribe_audio(audio_path)
+
+    # Clean up
+    try:
+        os.remove(audio_path)
+    except Exception:
+        pass
+
+    if not text:
+        await update.message.reply_text("No pude entender el audio 😅 ¿Podés escribirme lo que dijiste?")
+        return
+
+    await update.message.reply_text(f"🎤 _{text}_", parse_mode="Markdown")
+
+    # Process as normal text message
+    mock_text = update.message.text
+    update.message.text = text
+    await handle_message(update, context)
+    update.message.text = mock_text
+
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     user = db.get_user(telegram_id)

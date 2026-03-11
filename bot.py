@@ -68,6 +68,7 @@ def main():
     app.add_handler(CommandHandler("borrar", handlers.cmd_borrar))
     app.add_handler(CommandHandler("limpiar", handlers.cmd_limpiar))
     app.add_handler(MessageHandler(filters.PHOTO, handlers.handle_photo))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handlers.handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
     
     app.add_error_handler(_error_handler)
