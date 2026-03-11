@@ -154,10 +154,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # If we're waiting for clarification on a vague meal
     pending = context.user_data.get("pending_meal_text")
     if pending:
-        # Let user cancel
-        if text.lower() in ("no", "cancelar", "cancel", "nada", "olvidate", "olvida"):
+        # Cancel keywords or "still haven't eaten" responses
+        cancel_words = ("no", "cancelar", "cancel", "nada", "olvidate", "olvida",
+                        "todavia no", "todavía no", "aun no", "aún no", "no almorce",
+                        "no comi", "no desayune", "son las", "es temprano")
+        if any(w in text.lower() for w in cancel_words):
             context.user_data.pop("pending_meal_text", None)
-            await update.message.reply_text("Ok, no registré nada 👌")
+            await update.message.reply_text("Ok, avisame cuando comas algo 👌")
             return
         context.user_data.pop("pending_meal_text", None)
         combined = f"{pending} — {text}"

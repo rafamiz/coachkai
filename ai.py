@@ -287,9 +287,10 @@ async def classify_message(text: str) -> str:
         [{"role": "user", "content": f"Mensaje: '{text}'"}],
         system=(
             "Clasificá el mensaje. Respondé SOLO con una palabra:\n"
-            "'log' — si el usuario reporta lo que comió/comió/tomó (ej: comí pasta, desayuné tostadas, me tomé un café)\n"
-            "'question' — si es pregunta o consulta sobre nutrición, comida, calorías, dieta, salud, peso, ejercicio\n"
+            "'log' — SOLO si el usuario está reportando algo que YA comió o está comiendo AHORA (ej: 'comí pasta', 'me tomé un café', 'almorcé pollo'). Tiene que ser pasado o presente inmediato.\n"
+            "'question' — si pregunta qué comer, pide ideas, dice lo que TIENE en casa, consulta sobre nutrición, calorías, salud, dieta, peso, o ejercicio. También si dice que TODAVÍA NO comió.\n"
             "'other' — si no tiene nada que ver con comida ni salud\n"
+            "IMPORTANTE: 'tengo X en casa', 'qué hago con X', 'todavía no almorcé' → question, NO log.\n"
             "Respondé SOLO: log, question, o other."
         ),
     )
