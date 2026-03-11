@@ -102,23 +102,15 @@ INTAKE_TOOL = {
 }
 
 
-def _build_profile_context(user: dict) -> str:
+def _build_profile_context(user: dict, memories: list = None) -> str:
     """Return the best available profile context to inject into prompts."""
+    ctx = ""
     if user.get("profile_text"):
-        return f"\n\n[USER IDENTITY]\n{user['profile_text']}"
-    # Fallback to structured fields for users who onboarded via old web form
-    goal_map = {"lose_weight": "lose weight", "gain_muscle": "gain muscle",
-                "maintain": "maintain weight", "eat_healthier": "eat healthier"}
-    activity_map = {"sedentary": "sedentary", "lightly_active": "lightly active",
-                    "light": "lightly active", "moderate": "moderately active",
-                    "active": "active", "very_active": "very active"}
-    goal = goal_map.get(user.get("goal", ""), user.get("goal", "not set"))
-    activity = activity_map.get(user.get("activity_level", ""), user.get("activity_level", "not set"))
-    return (
-        f"\nUser profile: {user.get('name')}, {user.get('age')} years old, "
-        f"{user.get('weight_kg')}kg, {user.get('height_cm')}cm, "
-        f"goal: {goal}, activity level: {activity}"
-    )
+        ctx += f"\n\n[USER IDENTITY]\n{user['profile_text']}"
+    if memories:
+        mem_lines = "\n".join(f"- [{m.get('category','?')}] {m.get('content','')}" for m in memories[:15])
+        ctx += f"\n\n[MEMORIES]\n{mem_lines}"
+    return ctx
 
 
 async def _ask(messages: list, system: str = SYSTEM_BASE) -> str:
@@ -285,6 +277,11 @@ PATTERN DETECTION & MEMORY (use update_user_identity):
 - When the user says "recordá que...", "siempre como...", "los lunes voy al gym", etc. → update identity immediately
 - Proactively update identity when you detect something consistent across multiple messages
 
+MEMORIES (use save_memory tool):
+- Save specific facts that don't fit in the identity profile: food aversions, medical notes, life events
+- When user says "recorda que...", always call save_memory
+- You can call save_memory AND update_user_identity in the same turn if relevant to both
+
 QUESTIONS: answer directly and briefly, using profile context when relevant.
 OFF-TOPIC: politely redirect to nutrition/food."""
 
@@ -389,6 +386,32 @@ SET_REMINDER_TOOL = {
     }
 }
 
+SAVE_MEMORY_TOOL = {
+    "name": "save_memory",
+    "description": (
+        "Save an important fact or piece of information about the user to long-term memory. "
+        "Use when: user says 'recordá que...', reveals something medically relevant, "
+        "shares a strong food preference/aversion, mentions a life event relevant to nutrition, "
+        "or any fact that should persist across conversations. "
+        "Also use for things that don't fit in the identity profile but are worth remembering."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "The fact to remember, written clearly in third person. E.g. 'Rafa odia el brocoli y nunca lo va a comer.'"
+            },
+            "category": {
+                "type": "string",
+                "enum": ["preference", "health", "schedule", "goal", "event", "general"],
+                "description": "Category of the memory"
+            }
+        },
+        "required": ["content", "category"]
+    }
+}
+
 DELETE_MEAL_TOOL = {
     "name": "delete_meal",
     "description": (
@@ -474,6 +497,9 @@ async def process_message(
     tid = user.get("telegram_id", 0)
     today_meals    = _db.get_today_meals(tid)
     today_workouts = _db.get_today_workouts(tid)
+    memories       = _db.get_memories(tid, limit=15)
+    weekly_meals   = _db.get_weekly_meals(tid, days=7)
+    weekly_workouts = _db.get_weekly_workouts(tid, days=7)
 
     total_cal     = sum(m.get("calories_est",   0) or 0 for m in today_meals)
     total_burned  = sum(w.get("calories_burned", 0) or 0 for w in today_workouts)
@@ -510,7 +536,33 @@ async def process_message(
     if workout_lines:
         today_ctx += "\nWorkouts:\n" + "\n".join(workout_lines)
 
-    system = PROCESS_SYSTEM + _build_profile_context(user) + today_ctx
+    # Weekly summary (last 7 days, excluding today)
+    from datetime import date as _date
+    from collections import defaultdict
+    today_str = str(_date.today())
+    past_meals = [m for m in weekly_meals if not (m.get("eaten_at") or "").startswith(today_str)]
+    if past_meals:
+        by_day = defaultdict(list)
+        for m in past_meals:
+            day = (m.get("eaten_at") or "")[:10]
+            by_day[day].append(m)
+        weekly_lines = []
+        for day in sorted(by_day.keys(), reverse=True)[:6]:
+            day_meals = by_day[day]
+            day_cal = sum(m.get("calories_est", 0) or 0 for m in day_meals)
+            meal_descs = ", ".join(f"{m.get('meal_type','?')}:{(m.get('description') or '')[:20]}" for m in day_meals[:4])
+            weekly_lines.append(f"  {day}: {day_cal} kcal | {meal_descs}")
+        today_ctx += "\n\n[LAST 7 DAYS - meals]\n" + "\n".join(weekly_lines)
+
+    past_workouts = [w for w in weekly_workouts if not (w.get("logged_at") or "").startswith(today_str)]
+    if past_workouts:
+        wo_lines = []
+        for w in past_workouts[:5]:
+            day = (w.get("logged_at") or "")[:10]
+            wo_lines.append(f"  {day}: {w.get('workout_type','?')} | {(w.get('description') or '')[:30]} | {w.get('calories_burned',0)} kcal")
+        today_ctx += "\n\n[LAST 7 DAYS - workouts]\n" + "\n".join(wo_lines)
+
+    system = PROCESS_SYSTEM + _build_profile_context(user, memories) + today_ctx
 
     # Build message content (text or text + image)
     if photo_path:
@@ -539,7 +591,7 @@ async def process_message(
             model=MODEL,
             max_tokens=600,
             system=system,
-            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL, SET_REMINDER_TOOL],
+            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL, SET_REMINDER_TOOL, SAVE_MEMORY_TOOL],
             messages=messages,
         )
         _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
@@ -558,6 +610,8 @@ async def process_message(
                 return {"type": "delete_meal", "meal_ids": block.input.get("meal_ids", []), "reply": text_reply}
             if block.name == "set_reminder":
                 return {"type": "set_reminder", "time_str": block.input.get("time_str", ""), "message": block.input.get("message", ""), "reply": text_reply}
+            if block.name == "save_memory":
+                return {"type": "save_memory", "content": block.input.get("content", ""), "category": block.input.get("category", "general"), "reply": text_reply}
 
         reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
         return {"type": "text", "content": reply.strip()}

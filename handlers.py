@@ -708,6 +708,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["history"] = history[-100:]
         await update.message.reply_text(reply)
 
+    elif result["type"] == "save_memory":
+        db.save_memory(telegram_id, result["content"], result.get("category", "general"))
+        reply = result.get("reply") or "\U0001f9e0 Anotado, no lo olvido."
+        history = history + [{"role": "assistant", "content": reply}]
+        context.user_data["history"] = history[-100:]
+        await update.message.reply_text(reply)
+
     elif result["type"] == "delete_meal":
         meal_ids = result.get("meal_ids", [])
         deleted = 0

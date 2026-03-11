@@ -208,6 +208,16 @@ def init_db():
             )
         """)
 
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS memories (
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT NOT NULL,
+                content TEXT NOT NULL,
+                category TEXT DEFAULT 'general',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
     else:
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -330,6 +340,16 @@ def init_db():
                 sample_count INTEGER DEFAULT 0,
                 UNIQUE(user_id, workout_type),
                 FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                category TEXT DEFAULT 'general',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -711,7 +731,7 @@ def save_reminder(telegram_id: int, remind_at_iso: str, message: str) -> int:
     """Save a user reminder. remind_at_iso is ISO format datetime string."""
     conn = get_conn()
     c = _cur(conn)
-    if IS_POSTGRES:
+    if _USE_POSTGRES:
         c.execute(
             "INSERT INTO reminders (telegram_id, remind_at, message) VALUES (%s, %s, %s) RETURNING id",
             (telegram_id, remind_at_iso, message)
@@ -744,9 +764,94 @@ def get_pending_reminders() -> list:
 def mark_reminder_sent(reminder_id: int):
     conn = get_conn()
     c = _cur(conn)
-    if IS_POSTGRES:
+    if _USE_POSTGRES:
         c.execute("UPDATE reminders SET sent = TRUE WHERE id = %s", (reminder_id,))
     else:
         c.execute("UPDATE reminders SET sent = 1 WHERE id = ?", (reminder_id,))
     conn.commit()
     _release(conn)
+
+
+# ── Memories (episodic) ───────────────────────────────────────────────────────
+
+def save_memory(telegram_id: int, content: str, category: str = "general") -> int:
+    """Save an episodic memory for a user."""
+    conn = get_conn()
+    c = _cur(conn)
+    if _USE_POSTGRES:
+        c.execute(
+            "INSERT INTO memories (telegram_id, content, category) VALUES (%s, %s, %s) RETURNING id",
+            (telegram_id, content, category)
+        )
+        mid = c.fetchone()[0]
+    else:
+        c.execute(
+            "INSERT INTO memories (telegram_id, content, category) VALUES (?, ?, ?)",
+            (telegram_id, content, category)
+        )
+        mid = c.lastrowid
+    conn.commit()
+    _release(conn)
+    return mid
+
+
+def get_memories(telegram_id: int, limit: int = 20) -> list:
+    """Get recent memories for a user."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q(
+        "SELECT * FROM memories WHERE telegram_id = ? ORDER BY created_at DESC LIMIT ?"
+    ), (telegram_id, limit))
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)
+
+
+def get_weekly_meals(telegram_id: int, days: int = 7) -> list:
+    """Get meals from the last N days."""
+    conn = get_conn()
+    c = _cur(conn)
+    if _USE_POSTGRES:
+        c.execute(
+            f"SELECT * FROM meals WHERE telegram_id = %s AND eaten_at >= NOW() - INTERVAL '{days} days' ORDER BY eaten_at DESC",
+            (telegram_id,)
+        )
+    else:
+        c.execute(
+            "SELECT * FROM meals WHERE telegram_id = ? AND eaten_at >= datetime('now', ? || ' days') ORDER BY eaten_at DESC",
+            (telegram_id, f"-{days}")
+        )
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)
+
+
+def get_weekly_workouts(telegram_id: int, days: int = 7) -> list:
+    """Get workouts from the last N days."""
+    conn = get_conn()
+    c = _cur(conn)
+    if _USE_POSTGRES:
+        c.execute(
+            f"SELECT * FROM workouts WHERE telegram_id = %s AND logged_at >= NOW() - INTERVAL '{days} days' ORDER BY logged_at DESC",
+            (telegram_id,)
+        )
+    else:
+        c.execute(
+            "SELECT * FROM workouts WHERE telegram_id = ? AND logged_at >= datetime('now', ? || ' days') ORDER BY logged_at DESC",
+            (telegram_id, f"-{days}")
+        )
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)
+
+
+def get_last_meal_time(telegram_id: int):
+    """Get timestamp of the most recent meal logged."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT eaten_at FROM meals WHERE telegram_id = ? ORDER BY eaten_at DESC LIMIT 1"), (telegram_id,))
+    row = c.fetchone()
+    _release(conn)
+    if row:
+        return dict(row).get("eaten_at")
+    return None

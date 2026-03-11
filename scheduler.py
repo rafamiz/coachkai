@@ -32,6 +32,7 @@ def start_scheduler(app):
     _scheduler.add_job(analyze_all_patterns,     "interval", hours=1,    id="pattern_analysis")
     _scheduler.add_job(send_daily_summaries,     "cron",     hour=21, minute=0, id="daily_summary")
     _scheduler.add_job(check_reminders,          "interval", minutes=1,  id="reminders_check")
+    _scheduler.add_job(check_meal_absence,       "interval", minutes=30, id="absence_check")
     _scheduler.start()
     logger.info("Scheduler started")
 
@@ -310,6 +311,47 @@ async def check_reminders():
             logger.info(f"[scheduler] Sent reminder {r['id']} to {r['telegram_id']}")
         except Exception as e:
             logger.error(f"[scheduler] Error sending reminder {r['id']}: {e}")
+
+
+async def check_meal_absence():
+    """Nudge users who have not logged a meal in 5+ hours during daytime."""
+    if _bot_app is None:
+        return
+    import pytz
+    from datetime import datetime, timedelta
+    tz = pytz.timezone("America/Argentina/Buenos_Aires")
+    now = datetime.now(tz)
+    if not (10 <= now.hour < 22):
+        return
+    users = db.get_all_users()
+    for user in users:
+        if not user.get("onboarding_complete"):
+            continue
+        tid = user["telegram_id"]
+        last = db.get_last_meal_time(tid)
+        if last is None:
+            continue
+        try:
+            from datetime import datetime as dt
+            if isinstance(last, str):
+                last_dt = dt.fromisoformat(last.replace("Z", "+00:00"))
+                if last_dt.tzinfo is None:
+                    last_dt = tz.localize(last_dt)
+            else:
+                last_dt = last
+                if last_dt.tzinfo is None:
+                    last_dt = tz.localize(last_dt)
+            hours_since = (now - last_dt.astimezone(tz)).total_seconds() / 3600
+            if hours_since >= 5:
+                uid = user.get("id", 0)
+                if not db.already_sent_followup_today(uid, "absence_nudge"):
+                    await _bot_app.bot.send_message(
+                        chat_id=tid,
+                        text=f"\u23f0 Pasaron {int(hours_since)}hs desde tu ultima comida registrada. Ya comiste algo? No te olvides de registrarlo."
+                    )
+                    db.add_followup(uid, f"absence_nudge_{now.hour}", "absence_nudge")
+        except Exception as e:
+            logger.error(f"[scheduler] absence check error for {tid}: {e}")
 
 
 async def send_daily_summaries():
