@@ -30,11 +30,12 @@ def get_turn_cost() -> float:
     return _turn_cost
 
 SYSTEM_BASE = (
-    "Sos un coach de nutrición personal, cálido y alentador. "
-    "Hablás en español rioplatense, usás 'vos' en lugar de 'tú'. "
-    "Tus respuestas son MUY cortas: máximo 2-3 líneas, sin explicaciones largas. "
-    "Usás emojis de forma natural. Nunca sos sermoneador ni pesado. "
-    "Conversacional y directo al punto."
+    "Sos un coach de nutrición personal, cálido, directo y sin vueltas. "
+    "Hablás en español rioplatense, usás 'vos' siempre. "
+    "Tus respuestas son CORTAS: máximo 2-3 líneas. Sin introducciones, sin sermones. "
+    "Usás emojis con moderación. Sos como un amigo que sabe de nutrición, no un médico formal. "
+    "Si el usuario pregunta algo de nutrición o alimentación aunque no sea para registrar comida, respondés. "
+    "Si pregunta algo totalmente ajeno a nutrición, comida o salud, decís amablemente que solo podés ayudar con eso."
 )
 
 
@@ -275,6 +276,28 @@ async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_
     return await _ask([{"role": "user", "content": prompt}])
 
 
+async def is_food_log(text: str) -> bool:
+    """Return True if the message is a food log (user reporting what they ate/drank), not just a nutrition question."""
+    raw = await _ask(
+        [{"role": "user", "content": f"Mensaje: '{text}'"}],
+        system=(
+            "Clasificá si el mensaje es un REGISTRO de comida (el usuario está diciendo lo que comió, está comiendo, o comió recién) "
+            "o si es una PREGUNTA o CONSULTA (pide información, consejo, o habla en general). "
+            "Respondé SOLO 'registro' o 'pregunta'."
+        ),
+    )
+    return "registro" in raw.strip().lower()
+
+
+async def answer_nutrition_question(text: str, user: dict) -> str:
+    """Answer a general nutrition/health question."""
+    profile = f"Objetivo: {user['goal']}, Peso: {user['weight_kg']}kg, Actividad: {user['activity_level']}"
+    return await _ask([{
+        "role": "user",
+        "content": f"Pregunta: '{text}'\nPerfil del usuario: {profile}"
+    }])
+
+
 async def check_meal_vague(text: str) -> str | None:
     """Return a follow-up question if the meal description needs more detail, else None."""
     raw = await _ask(
@@ -294,16 +317,16 @@ async def check_meal_vague(text: str) -> str | None:
 
 
 async def classify_intent(text: str) -> bool:
-    """Return True if the message is food/meal related."""
+    """Return True if the message is nutrition/food/health related."""
     raw = await _ask(
-        [{"role": "user", "content": f"Message: '{text}'"}],
+        [{"role": "user", "content": f"Mensaje: '{text}'"}],
         system=(
-            "You are an intent classifier. "
-            "Reply ONLY with 'yes' if the message is about food, meals, drinks, eating, or nutrition. "
-            "Reply ONLY with 'no' for anything else."
+            "Sos un clasificador de intención. "
+            "Respondé SOLO 'si' si el mensaje trata sobre: comida, bebidas, alimentación, nutrición, calorías, macros, dieta, salud, peso, ejercicio, o cualquier pregunta relacionada con comer bien. "
+            "Respondé SOLO 'no' si el mensaje no tiene nada que ver con alimentación, nutrición o salud (ej: matemáticas, política, tecnología, geografía)."
         ),
     )
-    return raw.strip().lower().startswith("y")
+    return raw.strip().lower().startswith("s")
 
 
 async def generate_daily_summary(user: dict, meals: list) -> str:

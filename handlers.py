@@ -55,12 +55,32 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     total_cal = sum(m.get("calories_est", 0) or 0 for m in meals)
-    lines = [f"📊 *Resumen de hoy, {user['name']}:*\n"]
+    total_prot = sum(float(m.get("proteins_g", 0) or 0) for m in meals)
+    daily_goal = charts_module.estimate_daily_calories(user)
+    pct = round(total_cal / daily_goal * 100) if daily_goal else 0
+    remaining = max(0, daily_goal - total_cal)
+
+    meal_type_names = {"breakfast": "Desayuno", "lunch": "Almuerzo", "dinner": "Cena", "snack": "Merienda"}
+    lines = [f"📊 *{user['name']} — hoy*\n"]
     for m in meals:
-        t = datetime.fromisoformat(m["eaten_at"]).strftime("%H:%M")
+        try:
+            t = datetime.fromisoformat(m["eaten_at"]).strftime("%H:%M")
+        except Exception:
+            t = "?"
         cal = m.get("calories_est", 0) or 0
-        lines.append(f"• {t} — {m.get('meal_type', 'comida')}: {m.get('description', '')[:40]} (~{cal} kcal)")
-    lines.append(f"\n🔥 *Total estimado: {total_cal} kcal*")
+        tipo = meal_type_names.get(m.get("meal_type", ""), "Comida")
+        desc = (m.get("description", "") or "")[:35]
+        lines.append(f"• {t} {tipo}: {desc} (~{cal} kcal)")
+
+    # Progress bar
+    filled = min(10, pct // 10)
+    bar = "█" * filled + "░" * (10 - filled)
+    lines.append(f"\n🔥 *{total_cal} / {daily_goal} kcal* [{bar}] {pct}%")
+    lines.append(f"🥩 Proteína acumulada: *{total_prot:.0f}g*")
+    if remaining > 0:
+        lines.append(f"📉 Te quedan ~{remaining} kcal para hoy")
+    else:
+        lines.append("✅ ¡Ya alcanzaste tu meta calórica de hoy!")
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
@@ -118,23 +138,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # If we're waiting for clarification on a vague meal, combine and log
+    # If we're waiting for clarification on a vague meal
     pending = context.user_data.get("pending_meal_text")
     if pending:
+        # Let user cancel
+        if text.lower() in ("no", "cancelar", "cancel", "nada", "olvidate", "olvida"):
+            context.user_data.pop("pending_meal_text", None)
+            await update.message.reply_text("Ok, no registré nada 👌")
+            return
         context.user_data.pop("pending_meal_text", None)
         combined = f"{pending} — {text}"
         await _log_meal_text(update, context, user, combined)
         return
 
-    is_food = await ai.classify_intent(text)
-    if not is_food:
+    # Check if nutrition/food related at all
+    is_nutrition = await ai.classify_intent(text)
+    if not is_nutrition:
         await update.message.reply_text(
-            "Solo puedo ayudarte con el registro de tus comidas 🍽️\n"
-            "Contame qué comiste o mandame una foto!"
+            "Solo puedo ayudarte con nutrición y alimentación 🥗\n"
+            "Contame qué comiste o haceme una consulta sobre tu dieta!"
         )
         return
 
-    # Check if description is too vague (e.g. "comí" with no food specified)
+    # Check if it's a food log or a nutrition question
+    is_log = await ai.is_food_log(text)
+    if not is_log:
+        # It's a nutrition question — answer directly
+        response = await ai.answer_nutrition_question(text, user)
+        await update.message.reply_text(response)
+        return
+
+    # Check if description is too vague
     follow_up_question = await ai.check_meal_vague(text)
     if follow_up_question:
         context.user_data["pending_meal_text"] = text
