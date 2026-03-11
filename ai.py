@@ -246,18 +246,19 @@ async def generate_followup_message(user: dict, meal_type: str, ftype: str) -> s
     }
     meal_name = meal_names.get(meal_type, "la próxima comida")
 
+    name = user.get("name", "")
     if ftype == "reminder":
-        prompt = (
-            f"Mandá un recordatorio amigable y corto a {user['name']} "
-            f"diciéndole que en unos 30 minutos es hora de {meal_name}. "
-            "Preguntale qué tiene pensado comer. Máximo 2 oraciones."
-        )
+        prompt = f"Escribí UN mensaje corto de recordatorio para {name} avisándole que en 30 minutos es hora de {meal_name}. Preguntale qué va a comer. Máximo 2 oraciones. Hablale de vos."
     else:
-        prompt = (
-            f"Mandá un check-in amigable a {user['name']} preguntándole cómo va su alimentación hoy. "
-            "Máximo 2 oraciones, tono cálido."
-        )
-    return await _ask([{"role": "user", "content": prompt}])
+        prompt = f"Escribí UN mensaje corto preguntándole a {name} cómo va su alimentación hoy. Máximo 2 oraciones. Hablale de vos. No menciones otras personas."
+
+    system = (
+        "Sos NUTRIMATE, un coach de nutrición personal por Telegram. "
+        "Escribís mensajes directos al usuario en español rioplatense. "
+        "Nunca hablés de terceros, nunca digas que no podés hacer algo. "
+        "Solo escribí el mensaje, sin introducción ni explicación."
+    )
+    return await _ask([{"role": "user", "content": prompt}], system=system)
 
 
 async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_goal: int) -> str:
