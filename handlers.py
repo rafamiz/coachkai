@@ -320,6 +320,20 @@ async def cmd_perfil(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete all meals registered today."""
+    telegram_id = update.effective_user.id
+    user = db.get_user(telegram_id)
+    if not user or not user.get("onboarding_complete"):
+        await update.message.reply_text("Primero configurá tu perfil con /start.")
+        return
+    count = db.delete_today_meals(telegram_id)
+    if count > 0:
+        await update.message.reply_text(f"🗑 Eliminé {count} comida{'s' if count > 1 else ''} de hoy. Empezás de cero.")
+    else:
+        await update.message.reply_text("No había comidas registradas hoy.")
+
+
 async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     user = db.get_user(telegram_id)

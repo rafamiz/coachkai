@@ -331,6 +331,20 @@ def get_today_meals(telegram_id: int):
     return _rows(rows)
 
 
+def delete_today_meals(telegram_id: int) -> int:
+    """Delete all meals for today for a user. Returns count deleted."""
+    conn = get_conn()
+    c = _cur(conn)
+    date_frag, date_val = _today_clause("eaten_at")
+    c.execute(_q(f"SELECT COUNT(*) FROM meals WHERE telegram_id = ? AND {date_frag}"), (telegram_id, date_val))
+    row = c.fetchone()
+    count = list(dict(row).values())[0] if row else 0
+    c.execute(_q(f"DELETE FROM meals WHERE telegram_id = ? AND {date_frag}"), (telegram_id, date_val))
+    conn.commit()
+    _release(conn)
+    return count
+
+
 def delete_last_meal(telegram_id: int) -> str | None:
     """Delete the most recent meal for a user. Returns description or None."""
     conn = get_conn()
