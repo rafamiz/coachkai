@@ -276,21 +276,23 @@ async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_
     return await _ask([{"role": "user", "content": prompt}])
 
 
-async def classify_message(text: str) -> str:
+async def classify_message(text: str, history: list = None) -> str:
     """
     Single-call classifier. Returns 'log', 'question', or 'other'.
     - log: user reporting what they ate/drank
     - question: nutrition/health/food question
     - other: unrelated to food/nutrition
     """
+    messages = (history or []) + [{"role": "user", "content": f"Nuevo mensaje: '{text}'"}]
     raw = await _ask(
-        [{"role": "user", "content": f"Mensaje: '{text}'"}],
+        messages,
         system=(
-            "Clasificá el mensaje. Respondé SOLO con una palabra:\n"
-            "'log' — SOLO si el usuario está reportando algo que YA comió o está comiendo AHORA (ej: 'comí pasta', 'me tomé un café', 'almorcé pollo'). Tiene que ser pasado o presente inmediato.\n"
-            "'question' — si pregunta qué comer, pide ideas, dice lo que TIENE en casa, consulta sobre nutrición, calorías, salud, dieta, peso, o ejercicio. También si dice que TODAVÍA NO comió.\n"
-            "'other' — si no tiene nada que ver con comida ni salud\n"
-            "IMPORTANTE: 'tengo X en casa', 'qué hago con X', 'todavía no almorcé' → question, NO log.\n"
+            "Sos un clasificador de intención para un bot de nutrición. Tenés acceso al historial de conversación para entender el contexto.\n"
+            "Clasificá el ÚLTIMO mensaje del usuario. Respondé SOLO con una palabra:\n"
+            "'log' — SOLO si el usuario reporta algo que YA comió o está comiendo AHORA (ej: 'comí pasta', 'me tomé un café', 'dale lo como', 'voy a comer eso ahora'). Incluye confirmaciones de que va a comer algo mencionado antes.\n"
+            "'question' — si pregunta qué comer, pide ideas, da ingredientes, consulta nutrición/salud/dieta/peso/ejercicio, o da un detalle sobre cómo preparó algo (ej: 'todo junto', 'hervido', 'con sal').\n"
+            "'other' — si no tiene nada que ver con comida ni salud.\n"
+            "IMPORTANTE: respuestas cortas como 'todo junto', 'hervido', 'sin sal', 'con aceite' en contexto de una conversación sobre comida → 'question'.\n"
             "Respondé SOLO: log, question, o other."
         ),
     )
@@ -302,13 +304,11 @@ async def classify_message(text: str) -> str:
     return "other"
 
 
-async def answer_nutrition_question(text: str, user: dict) -> str:
+async def answer_nutrition_question(text: str, user: dict, history: list = None) -> str:
     """Answer a general nutrition/health question."""
-    profile = f"Objetivo: {user['goal']}, Peso: {user['weight_kg']}kg, Actividad: {user['activity_level']}"
-    return await _ask([{
-        "role": "user",
-        "content": f"Pregunta: '{text}'\nPerfil del usuario: {profile}"
-    }])
+    profile = f"Objetivo: {user['goal']}, Peso: {user['weight_kg']}kg, Actividad: {user['activity_level']}, Nombre: {user['name']}"
+    messages = (history or []) + [{"role": "user", "content": text}]
+    return await _ask(messages, system=SYSTEM_BASE + f"\nPerfil del usuario: {profile}")
 
 
 async def check_meal_vague(text: str) -> str | None:

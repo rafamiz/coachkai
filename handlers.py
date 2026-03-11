@@ -151,6 +151,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Maintain conversation history (last 8 messages)
+    history = context.user_data.get("history", [])
+    history.append({"role": "user", "content": text})
+    history = history[-8:]  # keep last 8
+    context.user_data["history"] = history
+
     # If we're waiting for clarification on a vague meal
     pending = context.user_data.get("pending_meal_text")
     if pending:
@@ -167,8 +173,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _log_meal_text(update, context, user, combined)
         return
 
-    # Single-call classification: log / question / other
-    intent = await ai.classify_message(text)
+    # Single-call classification with history context
+    intent = await ai.classify_message(text, history[:-1])  # history without current msg
     if intent == "other":
         await update.message.reply_text(
             "Solo puedo ayudarte con nutrición y alimentación 🥗\n"
@@ -176,7 +182,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     if intent == "question":
-        response = await ai.answer_nutrition_question(text, user)
+        response = await ai.answer_nutrition_question(text, user, history[:-1])
+        # Add bot response to history
+        history.append({"role": "assistant", "content": response})
+        context.user_data["history"] = history[-8:]
         await update.message.reply_text(response)
         return
 
