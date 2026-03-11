@@ -276,17 +276,29 @@ async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_
     return await _ask([{"role": "user", "content": prompt}])
 
 
-async def is_food_log(text: str) -> bool:
-    """Return True if the message is a food log (user reporting what they ate/drank), not just a nutrition question."""
+async def classify_message(text: str) -> str:
+    """
+    Single-call classifier. Returns 'log', 'question', or 'other'.
+    - log: user reporting what they ate/drank
+    - question: nutrition/health/food question
+    - other: unrelated to food/nutrition
+    """
     raw = await _ask(
         [{"role": "user", "content": f"Mensaje: '{text}'"}],
         system=(
-            "Clasificá si el mensaje es un REGISTRO de comida (el usuario está diciendo lo que comió, está comiendo, o comió recién) "
-            "o si es una PREGUNTA o CONSULTA (pide información, consejo, o habla en general). "
-            "Respondé SOLO 'registro' o 'pregunta'."
+            "Clasificá el mensaje. Respondé SOLO con una palabra:\n"
+            "'log' — si el usuario reporta lo que comió/comió/tomó (ej: comí pasta, desayuné tostadas, me tomé un café)\n"
+            "'question' — si es pregunta o consulta sobre nutrición, comida, calorías, dieta, salud, peso, ejercicio\n"
+            "'other' — si no tiene nada que ver con comida ni salud\n"
+            "Respondé SOLO: log, question, o other."
         ),
     )
-    return "registro" in raw.strip().lower()
+    r = raw.strip().lower()
+    if "log" in r:
+        return "log"
+    if "question" in r or "pregunta" in r or r.startswith("q"):
+        return "question"
+    return "other"
 
 
 async def answer_nutrition_question(text: str, user: dict) -> str:
@@ -316,17 +328,7 @@ async def check_meal_vague(text: str) -> str | None:
     return raw.strip()
 
 
-async def classify_intent(text: str) -> bool:
-    """Return True if the message is nutrition/food/health related."""
-    raw = await _ask(
-        [{"role": "user", "content": f"Mensaje: '{text}'"}],
-        system=(
-            "Sos un clasificador de intención. "
-            "Respondé SOLO 'si' si el mensaje trata sobre: comida, bebidas, alimentación, nutrición, calorías, macros, dieta, salud, peso, ejercicio, o cualquier pregunta relacionada con comer bien. "
-            "Respondé SOLO 'no' si el mensaje no tiene nada que ver con alimentación, nutrición o salud (ej: matemáticas, política, tecnología, geografía)."
-        ),
-    )
-    return raw.strip().lower().startswith("s")
+
 
 
 async def generate_daily_summary(user: dict, meals: list) -> str:

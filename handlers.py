@@ -151,19 +151,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _log_meal_text(update, context, user, combined)
         return
 
-    # Check if nutrition/food related at all
-    is_nutrition = await ai.classify_intent(text)
-    if not is_nutrition:
+    # Single-call classification: log / question / other
+    intent = await ai.classify_message(text)
+    if intent == "other":
         await update.message.reply_text(
             "Solo puedo ayudarte con nutrición y alimentación 🥗\n"
             "Contame qué comiste o haceme una consulta sobre tu dieta!"
         )
         return
-
-    # Check if it's a food log or a nutrition question
-    is_log = await ai.is_food_log(text)
-    if not is_log:
-        # It's a nutrition question — answer directly
+    if intent == "question":
         response = await ai.answer_nutrition_question(text, user)
         await update.message.reply_text(response)
         return

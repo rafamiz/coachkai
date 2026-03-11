@@ -27,6 +27,7 @@ def estimate_daily_calories(user: dict) -> int:
     activity_map = {
         "sedentary": 1.2,
         "light": 1.375,
+        "lightly_active": 1.375,
         "moderate": 1.55,
         "active": 1.725,
         "very_active": 1.9,
