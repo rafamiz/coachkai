@@ -2,8 +2,11 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from io import BytesIO
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+ART = ZoneInfo("America/Argentina/Buenos_Aires")
 
 import db
 import ai
@@ -20,11 +23,11 @@ MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"]
 def start_scheduler(app):
     global _bot_app, _scheduler
     _bot_app = app
-    _scheduler = AsyncIOScheduler()
+    _scheduler = AsyncIOScheduler(timezone=ART)
     _scheduler.add_job(check_and_send_followups, "interval", minutes=5, id="followup_check")
     _scheduler.add_job(update_all_schedules, "interval", hours=1, id="schedule_update")
-    # 21:00 ART = 00:00 UTC (UTC-3)
-    _scheduler.add_job(send_daily_summaries, "cron", hour=0, minute=0, id="daily_summary")
+    # 21:00 ART
+    _scheduler.add_job(send_daily_summaries, "cron", hour=21, minute=0, id="daily_summary")
     _scheduler.start()
     logger.info("Scheduler started")
 
@@ -69,7 +72,7 @@ async def check_and_send_followups():
     if _bot_app is None:
         return
 
-    now = datetime.now()
+    now = datetime.now(ART)
     current_minutes = now.hour * 60 + now.minute
     schedules = db.get_all_eating_schedules()
 
