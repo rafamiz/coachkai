@@ -1,729 +1,1445 @@
-import base64
-import os
-import anthropic
-
-_client = None
-
-
-def get_client():
-    global _client
-    if _client is None:
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
-        import logging
-        logging.getLogger(__name__).info(f"[ai] API key loaded: {'YES (len=' + str(len(key)) + ')' if key else 'NO - KEY MISSING'}")
-        _client = anthropic.AsyncAnthropic(api_key=key)
-    return _client
-
-
-MODEL = "claude-haiku-4-5"
-
-# Cost tracking (Haiku pricing: $0.80/MTok input, $4.00/MTok output)
-_COST_INPUT = 0.80 / 1_000_000
-_COST_OUTPUT = 4.00 / 1_000_000
-_turn_cost: float = 0.0
-
-def reset_turn_cost():
-    global _turn_cost
-    _turn_cost = 0.0
-
-def get_turn_cost() -> float:
-    return _turn_cost
-
+import base64
+
+import os
+
+import anthropic
+
+
+
+_client = None
+
+
+
+
+
+def get_client():
+
+    global _client
+
+    if _client is None:
+
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+
+        import logging
+
+        logging.getLogger(__name__).info(f"[ai] API key loaded: {'YES (len=' + str(len(key)) + ')' if key else 'NO - KEY MISSING'}")
+
+        _client = anthropic.AsyncAnthropic(api_key=key)
+
+    return _client
+
+
+
+
+
+MODEL = "claude-haiku-4-5"
+
+
+
+# Cost tracking (Haiku pricing: $0.80/MTok input, $4.00/MTok output)
+
+_COST_INPUT = 0.80 / 1_000_000
+
+_COST_OUTPUT = 4.00 / 1_000_000
+
+_turn_cost: float = 0.0
+
+
+
+def reset_turn_cost():
+
+    global _turn_cost
+
+    _turn_cost = 0.0
+
+
+
+def get_turn_cost() -> float:
+
+    return _turn_cost
+
+
+
 SYSTEM_BASE = (
-    "Sos Coach Kai, un coach de nutrición personal argentino: cálido, directo y confiable. "
-    "Hablás en español rioplatense auténtico — usás 'vos', 'dale', 'buenísimo', 'te cuento', 'mirá', etc. "
-    "Tus respuestas son CORTAS: máximo 2-3 líneas. Sin introducciones, sin sermones. "
-    "Usás emojis con moderación. Sos como un nutricionista argentino de confianza: cercano pero profesional. "
-    "NUNCA usás términos vulgares como 'boludo', 'ey', 'flaco' ni garabatos. Sí podés ser informal y genuino. "
-    "Si el usuario pregunta algo de nutrición o alimentación aunque no sea para registrar comida, respondés. "
-    "Si pregunta algo totalmente ajeno a nutrición, comida o salud, decís amablemente que solo podés ayudar con eso."
-)
-
-INTAKE_SYSTEM = """You are a warm, natural nutrition coach doing a first intake conversation with a new user.
-Your goal is to deeply understand the user so you can give truly personalized advice.
-You speak in Argentine Spanish ('vos', rioplatense), casual and friendly ??? like a knowledgeable friend, not a doctor.
-
-Topics you MUST cover before saving the profile (in any natural order):
-- Personal data: name, age, weight, height, where they live
-- Main goal and motivation, any previous attempts
-- Daily routine and work (desk job, physical work, hours, stress level)
-- Physical activity: what they do, how often, intensity
-- Eating habits: how many meals, rough schedule, if they eat breakfast/snacks
-- What they usually eat, what they like and dislike
-- Whether they cook, buy fresh ingredients, or prefer easy/fast options
-- Any food intolerances or restrictions
-
-Conversation rules:
-- Ask 1-2 questions per message, never more
-- If an answer is short or vague, dig deeper before moving on
-- Briefly acknowledge what they said before asking the next thing
-- Ask open-ended questions, not yes/no
-- Be curious and natural ??? this is a conversation, not a form
-- Do NOT rush to save the profile ??? make sure you have real detail on every topic
-
-When you have gathered sufficient, detailed information on ALL topics, call save_user_identity().
-Do not call it until you're confident you have a complete picture of the person."""
-
-INTAKE_TOOL = {
-    "name": "save_user_identity",
-    "description": (
-        "Save the complete user identity profile to the database. "
-        "Only call this once you have gathered enough detail across ALL key areas: "
-        "personal data, goals, lifestyle, work, training habits, and eating habits/preferences."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "identity_markdown": {
-                "type": "string",
-                "description": (
-                    "Complete user profile written in markdown, third person, minimum 200 words. "
-                    "Include all collected details: physical data, goals, lifestyle, work, training, "
-                    "eating habits, food preferences, cooking habits, meal schedule, intolerances."
-                )
-            },
-            "name":           {"type": "string", "description": "User's first name"},
-            "age":            {"type": "integer", "description": "Age in years"},
-            "weight_kg":      {"type": "number",  "description": "Weight in kg"},
-            "height_cm":      {"type": "number",  "description": "Height in cm"},
-            "goal": {
-                "type": "string",
-                "enum": ["lose_weight", "gain_muscle", "maintain", "eat_healthier"],
-                "description": "Primary nutrition goal"
-            },
-            "activity_level": {
-                "type": "string",
-                "enum": ["sedentary", "lightly_active", "active", "very_active"],
-                "description": "Overall physical activity level"
-            }
-        },
-        "required": ["identity_markdown", "name", "weight_kg", "height_cm", "goal", "activity_level"]
-    }
-}
-
-
-def _build_profile_context(user: dict, memories: list = None) -> str:
-    """Return the best available profile context to inject into prompts."""
-    ctx = ""
-    if user.get("profile_text"):
-        ctx += f"\n\n[USER IDENTITY]\n{user['profile_text']}"
-    if memories:
-        mem_lines = "\n".join(f"- [{m.get('category','?')}] {m.get('content','')}" for m in memories[:15])
-        ctx += f"\n\n[MEMORIES]\n{mem_lines}"
-    return ctx
-
-
-async def _ask(messages: list, system: str = SYSTEM_BASE) -> str:
-    global _turn_cost
-    try:
-        client = get_client()
-        resp = await client.messages.create(
-            model=MODEL,
-            max_tokens=600,
-            system=system,
-            messages=messages,
-        )
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
-        return resp.content[0].text.strip()
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"[ai] Claude error: {type(e).__name__}: {e}")
-        return "Uy, tuve un problemita t??cnico ???? Intent?? de nuevo en un momento."
-
-
-async def intake_turn(history: list, user_message: str) -> dict:
-    """
-    Run one turn of the intake conversation.
-    Returns:
-      {"reply": str, "done": False}                            ??? keep going
-      {"reply": str|None, "done": True, "profile": dict}      ??? profile saved
-    """
-    global _turn_cost
-    messages = history + [{"role": "user", "content": user_message}]
-    try:
-        client = get_client()
-        resp = await client.messages.create(
-            model=MODEL,
-            max_tokens=800,
-            system=INTAKE_SYSTEM,
-            tools=[INTAKE_TOOL],
-            messages=messages,
-        )
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
-
-        # Check if Claude called save_user_identity
-        for block in resp.content:
-            if block.type == "tool_use" and block.name == "save_user_identity":
-                inp = block.input
-                text_reply = next((b.text for b in resp.content if hasattr(b, "text")), None)
-                return {
-                    "reply": text_reply,
-                    "done": True,
-                    "profile": {
-                        "identity_markdown": inp.get("identity_markdown", ""),
-                        "name":           inp.get("name", ""),
-                        "age":            inp.get("age"),
-                        "weight_kg":      inp.get("weight_kg"),
-                        "height_cm":      inp.get("height_cm"),
-                        "goal":           inp.get("goal", "eat_healthier"),
-                        "activity_level": inp.get("activity_level", "sedentary"),
-                    }
-                }
-
-        reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
-        return {"reply": reply.strip(), "done": False}
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"[ai] intake_turn error: {e}")
-        return {"reply": "Uy, tuve un problemita ???? ??Pod??s repetir eso?", "done": False}
-
-
-async def onboarding_welcome(name: str) -> str:
-    return await _ask([{
-        "role": "user",
-        "content": f"El usuario se llama {name}. Dales la bienvenida al bot de nutrici??n en 2-3 oraciones, mencion?? su nombre y deciles que los vas a ayudar con su alimentaci??n."
-    }])
-
-
-async def generate_meal_plan(user: dict) -> dict:
-    """Returns dict with plan_text and meal_options (breakfasts, lunches, dinners)."""
-    profile = (
-        f"Nombre: {user.get('name','?')}, Edad: {user.get('age','?')} a??os, "
-        f"Peso: {user.get('weight_kg','?')} kg, Altura: {user.get('height_cm','?')} cm, "
-        f"Objetivo: {user.get('goal','?')}, Actividad: {user.get('activity_level','?')}"
-    )
-    profile_text = user.get("profile_text", "")
-    if profile_text:
-        profile += f"\n\nPerfil detallado:\n{profile_text[:500]}"
-
-    raw = await _ask([{
-        "role": "user",
-        "content": (
-            f"Gener?? un plan de alimentaci??n personalizado para:\n{profile}\n\n"
-            "Respond?? SOLO con JSON v??lido con esta estructura exacta:\n"
-            "{\n"
-            '  "calories": 2000,\n'
-            '  "protein_g": 150,\n'
-            '  "carbs_g": 200,\n'
-            '  "fat_g": 65,\n'
-            '  "summary": "Resumen breve del plan (2-3 oraciones)",\n'
-            '  "tips": ["tip 1", "tip 2", "tip 3"],\n'
-            '  "breakfasts": ["Opci??n 1", "Opci??n 2", "Opci??n 3"],\n'
-            '  "lunches": ["Opci??n 1", "Opci??n 2", "Opci??n 3"],\n'
-            '  "dinners": ["Opci??n 1", "Opci??n 2", "Opci??n 3"],\n'
-            '  "snacks": ["Opci??n 1", "Opci??n 2"]\n'
-            "}\n"
-            "Las opciones deben ser espec??ficas, con porciones aproximadas. Sin texto extra fuera del JSON."
-        )
-    }])
-
-    import json, re
-    try:
-        # Extract JSON from response
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-    except Exception:
-        pass
-    # Fallback
-    return {
-        "calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0,
-        "summary": raw, "tips": [],
-        "breakfasts": [], "lunches": [], "dinners": [], "snacks": []
-    }
-
-
-PROCESS_SYSTEM = """You are Coach Kai, a warm, direct Argentine nutrition coach.
-Speak in authentic rioplatense Spanish: use 'vos', 'dale', 'mirá', 'buenísimo', 'te cuento', natural Argentine expressions.
+    "Sos Coach Kai, un coach de nutrici\u00f3n personal. Tu tono es semiformal: argentino pero prolijo. "
+    "Habl\u00e1s con 'vos', us\u00e1s expresiones naturales del rioplatense, pero con compostura \u2014 como un profesional joven y cercano, no un amigo de la cancha. "
+    "Nada de 'ey', 'ey!', 'dale che', 'bolu', ni expresiones de hinchada. Para saludar us\u00e1 '\u00a1Hola!' o '\u00a1Buenas!'. S\u00ed pod\u00e9s decir 'dale', 'mir\u00e1', 'te comento', 'bueno'. "
+    "Tus respuestas son CORTAS: m\u00e1ximo 2-3 l\u00edneas. Sin introducciones ni sermones. "
+    "Usas emojis con moderaci\u00f3n. Respond\u00e9s cualquier consulta de nutrici\u00f3n o alimentaci\u00f3n. "
+    "Si preguntan algo totalmente ajeno, dec\u00eds amablemente que solo pod\u00e9s ayudar con nutrici\u00f3n."
+)
+
+
+
+INTAKE_SYSTEM = """You are a warm, natural nutrition coach doing a first intake conversation with a new user.
+
+Your goal is to deeply understand the user so you can give truly personalized advice.
+
+You speak in Argentine Spanish ('vos', rioplatense), casual and friendly ??? like a knowledgeable friend, not a doctor.
+
+
+
+Topics you MUST cover before saving the profile (in any natural order):
+
+- Personal data: name, age, weight, height, where they live
+
+- Main goal and motivation, any previous attempts
+
+- Daily routine and work (desk job, physical work, hours, stress level)
+
+- Physical activity: what they do, how often, intensity
+
+- Eating habits: how many meals, rough schedule, if they eat breakfast/snacks
+
+- What they usually eat, what they like and dislike
+
+- Whether they cook, buy fresh ingredients, or prefer easy/fast options
+
+- Any food intolerances or restrictions
+
+
+
+Conversation rules:
+
+- Ask 1-2 questions per message, never more
+
+- If an answer is short or vague, dig deeper before moving on
+
+- Briefly acknowledge what they said before asking the next thing
+
+- Ask open-ended questions, not yes/no
+
+- Be curious and natural ??? this is a conversation, not a form
+
+- Do NOT rush to save the profile ??? make sure you have real detail on every topic
+
+
+
+When you have gathered sufficient, detailed information on ALL topics, call save_user_identity().
+
+Do not call it until you're confident you have a complete picture of the person."""
+
+
+
+INTAKE_TOOL = {
+
+    "name": "save_user_identity",
+
+    "description": (
+
+        "Save the complete user identity profile to the database. "
+
+        "Only call this once you have gathered enough detail across ALL key areas: "
+
+        "personal data, goals, lifestyle, work, training habits, and eating habits/preferences."
+
+    ),
+
+    "input_schema": {
+
+        "type": "object",
+
+        "properties": {
+
+            "identity_markdown": {
+
+                "type": "string",
+
+                "description": (
+
+                    "Complete user profile written in markdown, third person, minimum 200 words. "
+
+                    "Include all collected details: physical data, goals, lifestyle, work, training, "
+
+                    "eating habits, food preferences, cooking habits, meal schedule, intolerances."
+
+                )
+
+            },
+
+            "name":           {"type": "string", "description": "User's first name"},
+
+            "age":            {"type": "integer", "description": "Age in years"},
+
+            "weight_kg":      {"type": "number",  "description": "Weight in kg"},
+
+            "height_cm":      {"type": "number",  "description": "Height in cm"},
+
+            "goal": {
+
+                "type": "string",
+
+                "enum": ["lose_weight", "gain_muscle", "maintain", "eat_healthier"],
+
+                "description": "Primary nutrition goal"
+
+            },
+
+            "activity_level": {
+
+                "type": "string",
+
+                "enum": ["sedentary", "lightly_active", "active", "very_active"],
+
+                "description": "Overall physical activity level"
+
+            }
+
+        },
+
+        "required": ["identity_markdown", "name", "weight_kg", "height_cm", "goal", "activity_level"]
+
+    }
+
+}
+
+
+
+
+
+def _build_profile_context(user: dict, memories: list = None) -> str:
+
+    """Return the best available profile context to inject into prompts."""
+
+    ctx = ""
+
+    if user.get("profile_text"):
+
+        ctx += f"\n\n[USER IDENTITY]\n{user['profile_text']}"
+
+    if memories:
+
+        mem_lines = "\n".join(f"- [{m.get('category','?')}] {m.get('content','')}" for m in memories[:15])
+
+        ctx += f"\n\n[MEMORIES]\n{mem_lines}"
+
+    return ctx
+
+
+
+
+
+async def _ask(messages: list, system: str = SYSTEM_BASE) -> str:
+
+    global _turn_cost
+
+    try:
+
+        client = get_client()
+
+        resp = await client.messages.create(
+
+            model=MODEL,
+
+            max_tokens=600,
+
+            system=system,
+
+            messages=messages,
+
+        )
+
+        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
+
+        return resp.content[0].text.strip()
+
+    except Exception as e:
+
+        import logging
+
+        logging.getLogger(__name__).error(f"[ai] Claude error: {type(e).__name__}: {e}")
+
+        return "Uy, tuve un problemita t??cnico ???? Intent?? de nuevo en un momento."
+
+
+
+
+
+async def intake_turn(history: list, user_message: str) -> dict:
+
+    """
+
+    Run one turn of the intake conversation.
+
+    Returns:
+
+      {"reply": str, "done": False}                            ??? keep going
+
+      {"reply": str|None, "done": True, "profile": dict}      ??? profile saved
+
+    """
+
+    global _turn_cost
+
+    messages = history + [{"role": "user", "content": user_message}]
+
+    try:
+
+        client = get_client()
+
+        resp = await client.messages.create(
+
+            model=MODEL,
+
+            max_tokens=800,
+
+            system=INTAKE_SYSTEM,
+
+            tools=[INTAKE_TOOL],
+
+            messages=messages,
+
+        )
+
+        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
+
+
+
+        # Check if Claude called save_user_identity
+
+        for block in resp.content:
+
+            if block.type == "tool_use" and block.name == "save_user_identity":
+
+                inp = block.input
+
+                text_reply = next((b.text for b in resp.content if hasattr(b, "text")), None)
+
+                return {
+
+                    "reply": text_reply,
+
+                    "done": True,
+
+                    "profile": {
+
+                        "identity_markdown": inp.get("identity_markdown", ""),
+
+                        "name":           inp.get("name", ""),
+
+                        "age":            inp.get("age"),
+
+                        "weight_kg":      inp.get("weight_kg"),
+
+                        "height_cm":      inp.get("height_cm"),
+
+                        "goal":           inp.get("goal", "eat_healthier"),
+
+                        "activity_level": inp.get("activity_level", "sedentary"),
+
+                    }
+
+                }
+
+
+
+        reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
+
+        return {"reply": reply.strip(), "done": False}
+
+    except Exception as e:
+
+        import logging
+
+        logging.getLogger(__name__).error(f"[ai] intake_turn error: {e}")
+
+        return {"reply": "Uy, tuve un problemita ???? ??Pod??s repetir eso?", "done": False}
+
+
+
+
+
+async def onboarding_welcome(name: str) -> str:
+
+    return await _ask([{
+
+        "role": "user",
+
+        "content": f"El usuario se llama {name}. Dales la bienvenida al bot de nutrici??n en 2-3 oraciones, mencion?? su nombre y deciles que los vas a ayudar con su alimentaci??n."
+
+    }])
+
+
+
+
+
+async def generate_meal_plan(user: dict) -> dict:
+
+    """Returns dict with plan_text and meal_options (breakfasts, lunches, dinners)."""
+
+    profile = (
+
+        f"Nombre: {user.get('name','?')}, Edad: {user.get('age','?')} a??os, "
+
+        f"Peso: {user.get('weight_kg','?')} kg, Altura: {user.get('height_cm','?')} cm, "
+
+        f"Objetivo: {user.get('goal','?')}, Actividad: {user.get('activity_level','?')}"
+
+    )
+
+    profile_text = user.get("profile_text", "")
+
+    if profile_text:
+
+        profile += f"\n\nPerfil detallado:\n{profile_text[:500]}"
+
+
+
+    raw = await _ask([{
+
+        "role": "user",
+
+        "content": (
+
+            f"Gener?? un plan de alimentaci??n personalizado para:\n{profile}\n\n"
+
+            "Respond?? SOLO con JSON v??lido con esta estructura exacta:\n"
+
+            "{\n"
+
+            '  "calories": 2000,\n'
+
+            '  "protein_g": 150,\n'
+
+            '  "carbs_g": 200,\n'
+
+            '  "fat_g": 65,\n'
+
+            '  "summary": "Resumen breve del plan (2-3 oraciones)",\n'
+
+            '  "tips": ["tip 1", "tip 2", "tip 3"],\n'
+
+            '  "breakfasts": ["Opci??n 1", "Opci??n 2", "Opci??n 3"],\n'
+
+            '  "lunches": ["Opci??n 1", "Opci??n 2", "Opci??n 3"],\n'
+
+            '  "dinners": ["Opci??n 1", "Opci??n 2", "Opci??n 3"],\n'
+
+            '  "snacks": ["Opci??n 1", "Opci??n 2"]\n'
+
+            "}\n"
+
+            "Las opciones deben ser espec??ficas, con porciones aproximadas. Sin texto extra fuera del JSON."
+
+        )
+
+    }])
+
+
+
+    import json, re
+
+    try:
+
+        # Extract JSON from response
+
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+
+        if match:
+
+            return json.loads(match.group())
+
+    except Exception:
+
+        pass
+
+    # Fallback
+
+    return {
+
+        "calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0,
+
+        "summary": raw, "tips": [],
+
+        "breakfasts": [], "lunches": [], "dinners": [], "snacks": []
+
+    }
+
+
+
+
+
+PROCESS_SYSTEM = """You are Coach Kai, an Argentine nutrition coach with a semiformal tone.
+Speak rioplatense Spanish naturally ('vos', 'mir\u00e1', 'dale', 'te comento') but with composure \u2014 like a young professional, not a street friend.
 Keep responses SHORT: max 2-3 lines. No intros, no lectures. Use emojis sparingly.
-Be like a trustworthy Argentine nutritionist: close and genuine, but professional. NEVER use vulgar words like 'boludo', 'ey', 'flaco'.
-
-You have the user's full identity profile and today's eating context (injected below).
-Use ALL of it ??? habits, preferences, schedule, goals, today's intake ??? for smart, precise responses.
-
-MEAL LOGGING (use log_meal tool):
-- Call log_meal() when the user clearly reports eating something, via text OR photo
-- Use their profile (usual portions, eating habits, preferences) + today's meals + time of day
-  to make the most accurate calorie/macro estimate possible ??? not generic values
-- If the description is truly too vague (missing food OR missing portion), ask ONE short
-  clarifying question instead of calling log_meal
-- tip field: include only if it adds real value ??? skip if the meal is clearly fine
-
-MEAL RECOMMENDATIONS (text response, no tool):
-- When asked what to eat or for a suggestion, give a SPECIFIC dish with portions
-- Factor in: remaining calories today, physical activity mentioned in conversation,
-  their preferences/intolerances/cooking habits from profile, time of day
-- If you need to know cook vs order, or what ingredients they have, ask first
-- Be actionable and concrete ??? not generic nutrition advice
-
-MEAL DELETION (use delete_meal tool):
-- When the user says a meal was duplicated, wrong, or asks to delete/remove a meal, use delete_meal
-- Match the meal by description and time from TODAY'S CONTEXT (each meal has an [id:X])
-- If there are clear duplicates (same description close in time), delete the extra ones
-
-REMINDERS (use set_reminder tool):
-- When the user asks to be reminded at a specific time ("avisame a las X", "recordame a las X"), call set_reminder
-- Use the time they said in HH:MM 24h format (Argentina timezone)
-- Set a short, friendly message relevant to what they asked
-- ALSO use proactively: if the user mentions a future event (training, workout, a match, a meal), automatically schedule a relevant reminder:
-  * "voy a entrenar a las 18" ??? set reminder at 17:30: "Antes de entrenar, ??ya comiste una colaci??n? Algo liviano 30 min antes te va a dar energ??a."
-  * "tengo f??tbol a las 20" ??? set reminder at 19:15 with pre-game nutrition tip
-  * "ma??ana tengo gym a las 7" ??? set reminder at 06:30 with pre-workout snack suggestion
-  * "voy a salir a correr en un rato" ??? set reminder in ~25 min with hydration reminder
-- Don't mention the reminder unless asked ??? just set it silently and continue the conversation normally
-
-PATTERN DETECTION & MEMORY (use update_user_identity):
-- Actively scan the conversation for recurring patterns: same meals on certain days, consistent workout times, food preferences that repeat
-- When the user says "record?? que...", "siempre como...", "los lunes voy al gym", etc. ??? update identity immediately
-- Proactively update identity when you detect something consistent across multiple messages
-
-MEMORIES (use save_memory tool):
-- Save specific facts that don't fit in the identity profile: food aversions, medical notes, life events
-- When user says "recorda que...", always call save_memory
-- You can call save_memory AND update_user_identity in the same turn if relevant to both
-
-QUESTIONS: answer directly and briefly, using profile context when relevant.
-OFF-TOPIC: politely redirect to nutrition/food."""
-
-LOG_WORKOUT_TOOL = {
-    "name": "log_workout",
-    "description": (
-        "Log a physical activity or workout the user just did or is reporting. "
-        "Use the user's weight and the described intensity/duration to estimate calories burned accurately."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "workout_type": {
-                "type": "string",
-                "enum": ["running", "cycling", "walking", "football", "padel", "tennis",
-                         "gym_strength", "gym_cardio", "swimming", "yoga", "boxing",
-                         "basketball", "hiking", "other"],
-                "description": "Category of the workout"
-            },
-            "description": {
-                "type": "string",
-                "description": "Natural description of the workout (e.g. 'Corr?? 5km en 28 minutos')"
-            },
-            "duration_min": {
-                "type": "integer",
-                "description": "Duration in minutes"
-            },
-            "calories_burned": {
-                "type": "integer",
-                "description": (
-                    "Estimated calories burned. Use MET ?? weight_kg ?? duration_hours. "
-                    "Approximate METs: running ~10, cycling ~8, football/padel ~7, "
-                    "gym_strength ~5, gym_cardio ~7, walking ~3.5, swimming ~8."
-                )
-            },
-            "intensity": {
-                "type": "string",
-                "enum": ["low", "moderate", "high", "very_high"]
-            },
-            "distance_km": {
-                "type": "number",
-                "description": "Distance in km (for running, cycling, etc.). Omit if not applicable."
-            },
-            "notes": {
-                "type": "string",
-                "description": "Any extra context worth noting (e.g. 'partido ganado', 'entren?? piernas')."
-            }
-        },
-        "required": ["workout_type", "description", "duration_min", "calories_burned", "intensity"]
-    }
-}
-
-UPDATE_IDENTITY_TOOL = {
-    "name": "update_user_identity",
-    "description": (
-        "Update the user's identity profile. Use proactively whenever you learn something meaningful: "
-        "weight change, new routine/sport, goal change, dietary restriction, job change, food preference, "
-        "eating schedule, or anything the user explicitly asks you to remember. "
-        "Also call when you detect recurring patterns in the chat (e.g. always trains Tue/Thu, "
-        "always skips breakfast, consistently eats milanesa on Fridays). "
-        "Update the identity to reflect the complete, current picture of the user."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "identity_markdown": {
-                "type": "string",
-                "description": "Complete updated profile in markdown, third person. Include ALL previous info plus new updates. Minimum 100 words."
-            },
-            "reason": {
-                "type": "string",
-                "description": "Brief reason (e.g. 'User asked to remember preference', 'Detected weekly padel pattern')"
-            },
-            "weight_kg":      {"type": "number",  "description": "Updated weight if changed"},
-            "goal":           {"type": "string",  "enum": ["lose_weight", "gain_muscle", "maintain", "eat_healthier"]},
-            "activity_level": {"type": "string",  "enum": ["sedentary", "lightly_active", "active", "very_active"]}
-        },
-        "required": ["identity_markdown", "reason"]
-    }
-}
-
-SET_REMINDER_TOOL = {
-    "name": "set_reminder",
-    "description": (
-        "Set a reminder for the user. Use when they say things like 'avisame a las X', "
-        "'recordame a las X', 'mandame un mensaje a las X'. "
-        "The reminder will be sent as a Telegram message at the specified time."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "time_str": {
-                "type": "string",
-                "description": "Time as HH:MM (24h format, Argentina time). E.g. '16:51'"
-            },
-            "message": {
-                "type": "string",
-                "description": "The reminder message to send the user. Short and friendly."
-            }
-        },
-        "required": ["time_str", "message"]
-    }
-}
-
-SAVE_MEMORY_TOOL = {
-    "name": "save_memory",
-    "description": (
-        "Save an important fact or piece of information about the user to long-term memory. "
-        "Use when: user says 'record?? que...', reveals something medically relevant, "
-        "shares a strong food preference/aversion, mentions a life event relevant to nutrition, "
-        "or any fact that should persist across conversations. "
-        "Also use for things that don't fit in the identity profile but are worth remembering."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "content": {
-                "type": "string",
-                "description": "The fact to remember, written clearly in third person. E.g. 'Rafa odia el brocoli y nunca lo va a comer.'"
-            },
-            "category": {
-                "type": "string",
-                "enum": ["preference", "health", "schedule", "goal", "event", "general"],
-                "description": "Category of the memory"
-            }
-        },
-        "required": ["content", "category"]
-    }
-}
-
-DELETE_MEAL_TOOL = {
-    "name": "delete_meal",
-    "description": (
-        "Delete one or more meals from today's log. Use when the user says a meal was duplicated, "
-        "registered by mistake, or asks to remove a specific meal. "
-        "Match against the meal_id values shown in TODAY'S CONTEXT."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "meal_ids": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "description": "List of meal IDs to delete (from TODAY'S CONTEXT)"
-            },
-            "reason": {
-                "type": "string",
-                "description": "Brief reason: 'duplicate', 'mistake', 'user_request'"
-            }
-        },
-        "required": ["meal_ids", "reason"]
-    }
-}
-
-LOG_MEAL_TOOL = {
-    "name": "log_meal",
-    "description": (
-        "Log a meal the user just ate or is currently eating. "
-        "Call this when the user clearly reports food consumption via text or photo. "
-        "Use the full context ??? user identity, today's meals, conversation history, time of day ??? "
-        "to produce the most accurate nutritional estimate possible."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "detected_food": {
-                "type": "string",
-                "description": "Clean, descriptive name of what was eaten (e.g. 'Arroz con pollo, plato mediano')"
-            },
-            "meal_type": {
-                "type": "string",
-                "enum": ["breakfast", "lunch", "dinner", "snack"]
-            },
-            "calories": {
-                "type": "integer",
-                "description": "Best calorie estimate given all available context"
-            },
-            "proteins_g":  {"type": "number", "description": "Protein in grams"},
-            "carbs_g":     {"type": "number", "description": "Carbohydrates in grams"},
-            "fats_g":      {"type": "number", "description": "Fat in grams"},
-            "tip": {
-                "type": "string",
-                "description": "One short, genuinely useful tip. Omit entirely if the meal is fine."
-            },
-            "aligned_with_goal": {
-                "type": "string",
-                "enum": ["yes", "partial", "no"],
-                "description": "How well this meal aligns with the user's goal"
-            }
-        },
-        "required": ["detected_food", "meal_type", "calories", "proteins_g", "carbs_g", "fats_g"]
-    }
-}
-
-
-async def process_message(
-    text: str,
-    user: dict,
-    history: list,
-    photo_path: str = None,
-) -> dict:
-    """
-    Single-call message processor. Handles logging, questions, and recommendations.
-
-    Returns:
-      {"type": "text",  "content": str}
-      {"type": "meal",  "meal": dict, "reply": str | None}
-    """
-    global _turn_cost
-
-    # Build today's context
-    import db as _db
-    tid = user.get("telegram_id", 0)
-    today_meals    = _db.get_today_meals(tid)
-    today_workouts = _db.get_today_workouts(tid)
-    memories       = _db.get_memories(tid, limit=15)
-    weekly_meals   = _db.get_weekly_meals(tid, days=7)
-    weekly_workouts = _db.get_weekly_workouts(tid, days=7)
-
-    total_cal     = sum(m.get("calories_est",   0) or 0 for m in today_meals)
-    total_burned  = sum(w.get("calories_burned", 0) or 0 for w in today_workouts)
-
-    # Estimate daily goal (Mifflin-St Jeor + activity multiplier)
-    w  = user.get("weight_kg") or 70
-    h  = user.get("height_cm") or 170
-    ag = user.get("age")       or 30
-    bmr = 10 * w + 6.25 * h - 5 * ag + 5
-    multipliers = {"sedentary": 1.2, "lightly_active": 1.375, "active": 1.55, "very_active": 1.725}
-    daily_goal  = int(bmr * multipliers.get(user.get("activity_level", "sedentary"), 1.2))
-    net_remaining = max(0, daily_goal + total_burned - total_cal)
-
-    # Meals lines
-    meal_lines = []
-    for m in today_meals:
-        t = (m.get("eaten_at") or "")[:16]
-        meal_lines.append(f"  [id:{m.get('id','?')}] {t} | {m.get('meal_type','?')} | {(m.get('description') or '')[:45]} | ~{m.get('calories_est',0)} kcal")
-
-    # Workout lines
-    workout_lines = []
-    for wo in today_workouts:
-        t = (wo.get("logged_at") or "")[:16]
-        workout_lines.append(f"  {t} | {wo.get('workout_type','?')} | {(wo.get('description') or '')[:45]} | ~{wo.get('calories_burned',0)} kcal burned")
-
-    today_ctx = (
-        f"\n\n[TODAY'S CONTEXT]"
-        f"\nCalories eaten: {total_cal} kcal"
-        f"\nCalories burned (workouts): {total_burned} kcal"
-        f"\nDaily goal: {daily_goal} kcal | Net remaining: {net_remaining} kcal"
-    )
-    if meal_lines:
-        today_ctx += "\nMeals:\n" + "\n".join(meal_lines)
-    if workout_lines:
-        today_ctx += "\nWorkouts:\n" + "\n".join(workout_lines)
-
-    # Weekly summary (last 7 days, excluding today)
-    from datetime import date as _date
-    from collections import defaultdict
-    today_str = str(_date.today())
-    past_meals = [m for m in weekly_meals if not (m.get("eaten_at") or "").startswith(today_str)]
-    if past_meals:
-        by_day = defaultdict(list)
-        for m in past_meals:
-            day = (m.get("eaten_at") or "")[:10]
-            by_day[day].append(m)
-        weekly_lines = []
-        for day in sorted(by_day.keys(), reverse=True)[:6]:
-            day_meals = by_day[day]
-            day_cal = sum(m.get("calories_est", 0) or 0 for m in day_meals)
-            meal_descs = ", ".join(f"{m.get('meal_type','?')}:{(m.get('description') or '')[:20]}" for m in day_meals[:4])
-            weekly_lines.append(f"  {day}: {day_cal} kcal | {meal_descs}")
-        today_ctx += "\n\n[LAST 7 DAYS - meals]\n" + "\n".join(weekly_lines)
-
-    past_workouts = [w for w in weekly_workouts if not (w.get("logged_at") or "").startswith(today_str)]
-    if past_workouts:
-        wo_lines = []
-        for w in past_workouts[:5]:
-            day = (w.get("logged_at") or "")[:10]
-            wo_lines.append(f"  {day}: {w.get('workout_type','?')} | {(w.get('description') or '')[:30]} | {w.get('calories_burned',0)} kcal")
-        today_ctx += "\n\n[LAST 7 DAYS - workouts]\n" + "\n".join(wo_lines)
-
-    system = PROCESS_SYSTEM + _build_profile_context(user, memories) + today_ctx
-
-    # Build message content (text or text + image)
-    if photo_path:
-        try:
-            with open(photo_path, "rb") as f:
-                img_data = base64.standard_b64encode(f.read()).decode("utf-8")
-            ext = photo_path.rsplit(".", 1)[-1].lower()
-            media_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
-                          "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
-            content = [
-                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}},
-                {"type": "text", "text": text or "Registr?? esta comida."},
-            ]
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"[ai] photo read error: {e}")
-            content = text or "No pude leer la foto."
-    else:
-        content = text
-
-    messages = history + [{"role": "user", "content": content}]
-
-    try:
-        client = get_client()
-        resp = await client.messages.create(
-            model=MODEL,
-            max_tokens=600,
-            system=system,
-            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL, SET_REMINDER_TOOL, SAVE_MEMORY_TOOL],
-            messages=messages,
-        )
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
-
-        for block in resp.content:
-            if block.type != "tool_use":
-                continue
-            text_reply = next((b.text for b in resp.content if hasattr(b, "text")), None)
-            if block.name == "log_meal":
-                return {"type": "meal", "meal": block.input, "reply": text_reply}
-            if block.name == "log_workout":
-                return {"type": "workout", "workout": block.input, "reply": text_reply}
-            if block.name == "update_user_identity":
-                return {"type": "identity_update", "update": block.input, "reply": text_reply}
-            if block.name == "delete_meal":
-                return {"type": "delete_meal", "meal_ids": block.input.get("meal_ids", []), "reply": text_reply}
-            if block.name == "set_reminder":
-                return {"type": "set_reminder", "time_str": block.input.get("time_str", ""), "message": block.input.get("message", ""), "reply": text_reply}
-            if block.name == "save_memory":
-                return {"type": "save_memory", "content": block.input.get("content", ""), "category": block.input.get("category", "general"), "reply": text_reply}
-
-        reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
-        return {"type": "text", "content": reply.strip()}
-
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"[ai] process_message error: {e}")
-        return {"type": "text", "content": "Uy, tuve un problemita t??cnico ???? Intent?? de nuevo en un momento."}
-
-
-async def generate_proactive_message(
-    user: dict,
-    trigger: str,
-    trigger_info: dict,
-    today_meals: list,
-    today_workouts: list,
-    daily_goal: int,
-) -> str:
-    """
-    Generate a context-aware proactive message for the scheduler.
-
-    trigger values:
-      "pre_meal"         ??? ~30 min before usual meal time
-      "meal_followup"    ??? ~45 min after usual meal time, meal not logged
-      "workout_checkin"  ??? ~20 min after usual workout end, workout not logged
-    """
-    profile_ctx = _build_profile_context(user)
-
-    total_cal    = sum(m.get("calories_est",   0) or 0 for m in today_meals)
-    total_burned = sum(w.get("calories_burned", 0) or 0 for w in today_workouts)
-    remaining    = max(0, daily_goal + total_burned - total_cal)
-
-    meal_lines = [
-        f"  {(m.get('eaten_at') or '')[:16]} | {m.get('meal_type','?')} | {(m.get('description') or '')[:40]} | ~{m.get('calories_est',0)} kcal"
-        for m in today_meals
-    ]
-    workout_lines = [
-        f"  {(w.get('logged_at') or '')[:16]} | {w.get('workout_type','?')} | {(w.get('description') or '')[:40]} | ~{w.get('calories_burned',0)} kcal"
-        for w in today_workouts
-    ]
-
-    today_ctx = (
-        f"\n[TODAY: {total_cal} kcal eaten / {total_burned} kcal burned / {remaining} kcal net remaining]"
-        + ("\nMeals:\n" + "\n".join(meal_lines) if meal_lines else "\nNo meals logged yet.")
-        + ("\nWorkouts:\n" + "\n".join(workout_lines) if workout_lines else "\nNo workouts logged yet.")
-    )
-
-    if trigger == "pre_meal":
-        meal_type = trigger_info.get("meal_type", "comida")
-        meal_names = {"breakfast": "desayuno", "lunch": "almuerzo", "dinner": "cena", "snack": "merienda"}
-        meal_name = meal_names.get(meal_type, meal_type)
-        instruction = (
-            f"Send a SHORT pre-meal reminder for {meal_name} (in ~30 min). "
-            f"Use today's context: mention calories burned if they trained, suggest what kind of food would be ideal given their remaining goal. "
-            f"Be specific, not generic. Max 2-3 lines."
-        )
-    elif trigger == "meal_followup":
-        meal_type = trigger_info.get("meal_type", "comida")
-        meal_names = {"breakfast": "desayuno", "lunch": "almuerzo", "dinner": "cena", "snack": "merienda"}
-        meal_name = meal_names.get(meal_type, meal_type)
-        instruction = (
-            f"The user usually has {meal_name} around this time but hasn't logged it. "
-            f"Ask casually if they already ate ??? keep it very short, 1 line max."
-        )
-    elif trigger == "workout_checkin":
-        workout_type = trigger_info.get("workout_type", "entrenamiento")
-        instruction = (
-            f"The user usually does {workout_type} around this time and hasn't logged it today. "
-            f"Ask if they trained, in a casual friendly way. If they confirm, they can tell you how it went and you'll log it. "
-            f"Max 2 lines. Don't be pushy."
-        )
-    else:
-        instruction = "Send a short friendly check-in about how their nutrition is going today. Max 2 lines."
-
-    system = (
-        "You are Coach Kai, a warm personal nutrition coach. "
-        "Speak in Argentine Spanish (rioplatense, 'vos'). Be concise and natural.\n"
-        + profile_ctx + today_ctx
-    )
-    return await _ask([{"role": "user", "content": instruction}], system=system)
-
-
-async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_goal: int) -> str:
-    pct = int(total_cal / daily_goal * 100) if daily_goal else 0
-    meal_list = ", ".join(
-        f"{m.get('meal_type', 'comida')} (~{m.get('calories_est', 0)} kcal)" for m in meals
-    )
-    prompt = (
-        f"Hac?? un resumen diario de alimentaci??n para {user['name']}.\n"
-        f"Comidas: {meal_list}\n"
-        f"Total: {total_cal} kcal ({pct}% de meta diaria de {daily_goal} kcal)\n"
-        f"Objetivo: {user['goal']}\n\n"
-        "Resumen en 2-3 oraciones: qu?? comi??, si estuvo bien, un aliento para ma??ana. "
-        "Agreg?? 1-2 emojis relevantes."
-    )
-    return await _ask([{"role": "user", "content": prompt}])
-
-
-
-
-async def generate_daily_summary(user: dict, meals: list) -> str:
-    if not meals:
-        return None
-    total_cal = sum(m.get("calories_est", 0) or 0 for m in meals)
-    meal_list = ", ".join(
-        f"{m.get('meal_type', 'comida')} (~{m.get('calories_est', 0)} kcal)" for m in meals
-    )
-    prompt = (
-        f"Hac?? un resumen diario de alimentaci??n para {user['name']}.\n"
-        f"Comidas del d??a: {meal_list}\n"
-        f"Total estimado: {total_cal} kcal\n"
-        f"Objetivo del usuario: {user['goal']}\n\n"
-        "Resumen en 3-4 oraciones: qu?? comi??, si estuvo bien para su objetivo, un aliento para ma??ana."
-    )
-    return await _ask([{"role": "user", "content": prompt}])
+NEVER use: 'ey', 'boludo', 'flaco', 'loco', 'che', or any street slang. To greet, use 'Hola!' or 'Buenas!'. DO use: 'dale', 'mir\u00e1', 'bueno', 'te comento', 'perfecto', 'claro'.
+
+
+You have the user's full identity profile and today's eating context (injected below).
+
+Use ALL of it ??? habits, preferences, schedule, goals, today's intake ??? for smart, precise responses.
+
+
+
+MEAL LOGGING (use log_meal tool):
+
+- Call log_meal() when the user clearly reports eating something, via text OR photo
+
+- Use their profile (usual portions, eating habits, preferences) + today's meals + time of day
+
+  to make the most accurate calorie/macro estimate possible ??? not generic values
+
+- If the description is truly too vague (missing food OR missing portion), ask ONE short
+
+  clarifying question instead of calling log_meal
+
+- tip field: include only if it adds real value ??? skip if the meal is clearly fine
+
+
+
+MEAL RECOMMENDATIONS (text response, no tool):
+
+- When asked what to eat or for a suggestion, give a SPECIFIC dish with portions
+
+- Factor in: remaining calories today, physical activity mentioned in conversation,
+
+  their preferences/intolerances/cooking habits from profile, time of day
+
+- If you need to know cook vs order, or what ingredients they have, ask first
+
+- Be actionable and concrete ??? not generic nutrition advice
+
+
+
+MEAL DELETION (use delete_meal tool):
+
+- When the user says a meal was duplicated, wrong, or asks to delete/remove a meal, use delete_meal
+
+- Match the meal by description and time from TODAY'S CONTEXT (each meal has an [id:X])
+
+- If there are clear duplicates (same description close in time), delete the extra ones
+
+
+
+REMINDERS (use set_reminder tool):
+
+- When the user asks to be reminded at a specific time ("avisame a las X", "recordame a las X"), call set_reminder
+
+- Use the time they said in HH:MM 24h format (Argentina timezone)
+
+- Set a short, friendly message relevant to what they asked
+
+- ALSO use proactively: if the user mentions a future event (training, workout, a match, a meal), automatically schedule a relevant reminder:
+
+  * "voy a entrenar a las 18" ??? set reminder at 17:30: "Antes de entrenar, ??ya comiste una colaci??n? Algo liviano 30 min antes te va a dar energ??a."
+
+  * "tengo f??tbol a las 20" ??? set reminder at 19:15 with pre-game nutrition tip
+
+  * "ma??ana tengo gym a las 7" ??? set reminder at 06:30 with pre-workout snack suggestion
+
+  * "voy a salir a correr en un rato" ??? set reminder in ~25 min with hydration reminder
+
+- Don't mention the reminder unless asked ??? just set it silently and continue the conversation normally
+
+
+
+PATTERN DETECTION & MEMORY (use update_user_identity):
+
+- Actively scan the conversation for recurring patterns: same meals on certain days, consistent workout times, food preferences that repeat
+
+- When the user says "record?? que...", "siempre como...", "los lunes voy al gym", etc. ??? update identity immediately
+
+- Proactively update identity when you detect something consistent across multiple messages
+
+
+
+MEMORIES (use save_memory tool):
+
+- Save specific facts that don't fit in the identity profile: food aversions, medical notes, life events
+
+- When user says "recorda que...", always call save_memory
+
+- You can call save_memory AND update_user_identity in the same turn if relevant to both
+
+
+
+QUESTIONS: answer directly and briefly, using profile context when relevant.
+
+OFF-TOPIC: politely redirect to nutrition/food."""
+
+
+
+LOG_WORKOUT_TOOL = {
+
+    "name": "log_workout",
+
+    "description": (
+
+        "Log a physical activity or workout the user just did or is reporting. "
+
+        "Use the user's weight and the described intensity/duration to estimate calories burned accurately."
+
+    ),
+
+    "input_schema": {
+
+        "type": "object",
+
+        "properties": {
+
+            "workout_type": {
+
+                "type": "string",
+
+                "enum": ["running", "cycling", "walking", "football", "padel", "tennis",
+
+                         "gym_strength", "gym_cardio", "swimming", "yoga", "boxing",
+
+                         "basketball", "hiking", "other"],
+
+                "description": "Category of the workout"
+
+            },
+
+            "description": {
+
+                "type": "string",
+
+                "description": "Natural description of the workout (e.g. 'Corr?? 5km en 28 minutos')"
+
+            },
+
+            "duration_min": {
+
+                "type": "integer",
+
+                "description": "Duration in minutes"
+
+            },
+
+            "calories_burned": {
+
+                "type": "integer",
+
+                "description": (
+
+                    "Estimated calories burned. Use MET ?? weight_kg ?? duration_hours. "
+
+                    "Approximate METs: running ~10, cycling ~8, football/padel ~7, "
+
+                    "gym_strength ~5, gym_cardio ~7, walking ~3.5, swimming ~8."
+
+                )
+
+            },
+
+            "intensity": {
+
+                "type": "string",
+
+                "enum": ["low", "moderate", "high", "very_high"]
+
+            },
+
+            "distance_km": {
+
+                "type": "number",
+
+                "description": "Distance in km (for running, cycling, etc.). Omit if not applicable."
+
+            },
+
+            "notes": {
+
+                "type": "string",
+
+                "description": "Any extra context worth noting (e.g. 'partido ganado', 'entren?? piernas')."
+
+            }
+
+        },
+
+        "required": ["workout_type", "description", "duration_min", "calories_burned", "intensity"]
+
+    }
+
+}
+
+
+
+UPDATE_IDENTITY_TOOL = {
+
+    "name": "update_user_identity",
+
+    "description": (
+
+        "Update the user's identity profile. Use proactively whenever you learn something meaningful: "
+
+        "weight change, new routine/sport, goal change, dietary restriction, job change, food preference, "
+
+        "eating schedule, or anything the user explicitly asks you to remember. "
+
+        "Also call when you detect recurring patterns in the chat (e.g. always trains Tue/Thu, "
+
+        "always skips breakfast, consistently eats milanesa on Fridays). "
+
+        "Update the identity to reflect the complete, current picture of the user."
+
+    ),
+
+    "input_schema": {
+
+        "type": "object",
+
+        "properties": {
+
+            "identity_markdown": {
+
+                "type": "string",
+
+                "description": "Complete updated profile in markdown, third person. Include ALL previous info plus new updates. Minimum 100 words."
+
+            },
+
+            "reason": {
+
+                "type": "string",
+
+                "description": "Brief reason (e.g. 'User asked to remember preference', 'Detected weekly padel pattern')"
+
+            },
+
+            "weight_kg":      {"type": "number",  "description": "Updated weight if changed"},
+
+            "goal":           {"type": "string",  "enum": ["lose_weight", "gain_muscle", "maintain", "eat_healthier"]},
+
+            "activity_level": {"type": "string",  "enum": ["sedentary", "lightly_active", "active", "very_active"]}
+
+        },
+
+        "required": ["identity_markdown", "reason"]
+
+    }
+
+}
+
+
+
+SET_REMINDER_TOOL = {
+
+    "name": "set_reminder",
+
+    "description": (
+
+        "Set a reminder for the user. Use when they say things like 'avisame a las X', "
+
+        "'recordame a las X', 'mandame un mensaje a las X'. "
+
+        "The reminder will be sent as a Telegram message at the specified time."
+
+    ),
+
+    "input_schema": {
+
+        "type": "object",
+
+        "properties": {
+
+            "time_str": {
+
+                "type": "string",
+
+                "description": "Time as HH:MM (24h format, Argentina time). E.g. '16:51'"
+
+            },
+
+            "message": {
+
+                "type": "string",
+
+                "description": "The reminder message to send the user. Short and friendly."
+
+            }
+
+        },
+
+        "required": ["time_str", "message"]
+
+    }
+
+}
+
+
+
+SAVE_MEMORY_TOOL = {
+
+    "name": "save_memory",
+
+    "description": (
+
+        "Save an important fact or piece of information about the user to long-term memory. "
+
+        "Use when: user says 'record?? que...', reveals something medically relevant, "
+
+        "shares a strong food preference/aversion, mentions a life event relevant to nutrition, "
+
+        "or any fact that should persist across conversations. "
+
+        "Also use for things that don't fit in the identity profile but are worth remembering."
+
+    ),
+
+    "input_schema": {
+
+        "type": "object",
+
+        "properties": {
+
+            "content": {
+
+                "type": "string",
+
+                "description": "The fact to remember, written clearly in third person. E.g. 'Rafa odia el brocoli y nunca lo va a comer.'"
+
+            },
+
+            "category": {
+
+                "type": "string",
+
+                "enum": ["preference", "health", "schedule", "goal", "event", "general"],
+
+                "description": "Category of the memory"
+
+            }
+
+        },
+
+        "required": ["content", "category"]
+
+    }
+
+}
+
+
+
+DELETE_MEAL_TOOL = {
+
+    "name": "delete_meal",
+
+    "description": (
+
+        "Delete one or more meals from today's log. Use when the user says a meal was duplicated, "
+
+        "registered by mistake, or asks to remove a specific meal. "
+
+        "Match against the meal_id values shown in TODAY'S CONTEXT."
+
+    ),
+
+    "input_schema": {
+
+        "type": "object",
+
+        "properties": {
+
+            "meal_ids": {
+
+                "type": "array",
+
+                "items": {"type": "integer"},
+
+                "description": "List of meal IDs to delete (from TODAY'S CONTEXT)"
+
+            },
+
+            "reason": {
+
+                "type": "string",
+
+                "description": "Brief reason: 'duplicate', 'mistake', 'user_request'"
+
+            }
+
+        },
+
+        "required": ["meal_ids", "reason"]
+
+    }
+
+}
+
+
+
+LOG_MEAL_TOOL = {
+
+    "name": "log_meal",
+
+    "description": (
+
+        "Log a meal the user just ate or is currently eating. "
+
+        "Call this when the user clearly reports food consumption via text or photo. "
+
+        "Use the full context ??? user identity, today's meals, conversation history, time of day ??? "
+
+        "to produce the most accurate nutritional estimate possible."
+
+    ),
+
+    "input_schema": {
+
+        "type": "object",
+
+        "properties": {
+
+            "detected_food": {
+
+                "type": "string",
+
+                "description": "Clean, descriptive name of what was eaten (e.g. 'Arroz con pollo, plato mediano')"
+
+            },
+
+            "meal_type": {
+
+                "type": "string",
+
+                "enum": ["breakfast", "lunch", "dinner", "snack"]
+
+            },
+
+            "calories": {
+
+                "type": "integer",
+
+                "description": "Best calorie estimate given all available context"
+
+            },
+
+            "proteins_g":  {"type": "number", "description": "Protein in grams"},
+
+            "carbs_g":     {"type": "number", "description": "Carbohydrates in grams"},
+
+            "fats_g":      {"type": "number", "description": "Fat in grams"},
+
+            "tip": {
+
+                "type": "string",
+
+                "description": "One short, genuinely useful tip. Omit entirely if the meal is fine."
+
+            },
+
+            "aligned_with_goal": {
+
+                "type": "string",
+
+                "enum": ["yes", "partial", "no"],
+
+                "description": "How well this meal aligns with the user's goal"
+
+            }
+
+        },
+
+        "required": ["detected_food", "meal_type", "calories", "proteins_g", "carbs_g", "fats_g"]
+
+    }
+
+}
+
+
+
+
+
+async def process_message(
+
+    text: str,
+
+    user: dict,
+
+    history: list,
+
+    photo_path: str = None,
+
+) -> dict:
+
+    """
+
+    Single-call message processor. Handles logging, questions, and recommendations.
+
+
+
+    Returns:
+
+      {"type": "text",  "content": str}
+
+      {"type": "meal",  "meal": dict, "reply": str | None}
+
+    """
+
+    global _turn_cost
+
+
+
+    # Build today's context
+
+    import db as _db
+
+    tid = user.get("telegram_id", 0)
+
+    today_meals    = _db.get_today_meals(tid)
+
+    today_workouts = _db.get_today_workouts(tid)
+
+    memories       = _db.get_memories(tid, limit=15)
+
+    weekly_meals   = _db.get_weekly_meals(tid, days=7)
+
+    weekly_workouts = _db.get_weekly_workouts(tid, days=7)
+
+
+
+    total_cal     = sum(m.get("calories_est",   0) or 0 for m in today_meals)
+
+    total_burned  = sum(w.get("calories_burned", 0) or 0 for w in today_workouts)
+
+
+
+    # Estimate daily goal (Mifflin-St Jeor + activity multiplier)
+
+    w  = user.get("weight_kg") or 70
+
+    h  = user.get("height_cm") or 170
+
+    ag = user.get("age")       or 30
+
+    bmr = 10 * w + 6.25 * h - 5 * ag + 5
+
+    multipliers = {"sedentary": 1.2, "lightly_active": 1.375, "active": 1.55, "very_active": 1.725}
+
+    daily_goal  = int(bmr * multipliers.get(user.get("activity_level", "sedentary"), 1.2))
+
+    net_remaining = max(0, daily_goal + total_burned - total_cal)
+
+
+
+    # Meals lines
+
+    meal_lines = []
+
+    for m in today_meals:
+
+        t = (m.get("eaten_at") or "")[:16]
+
+        meal_lines.append(f"  [id:{m.get('id','?')}] {t} | {m.get('meal_type','?')} | {(m.get('description') or '')[:45]} | ~{m.get('calories_est',0)} kcal")
+
+
+
+    # Workout lines
+
+    workout_lines = []
+
+    for wo in today_workouts:
+
+        t = (wo.get("logged_at") or "")[:16]
+
+        workout_lines.append(f"  {t} | {wo.get('workout_type','?')} | {(wo.get('description') or '')[:45]} | ~{wo.get('calories_burned',0)} kcal burned")
+
+
+
+    today_ctx = (
+
+        f"\n\n[TODAY'S CONTEXT]"
+
+        f"\nCalories eaten: {total_cal} kcal"
+
+        f"\nCalories burned (workouts): {total_burned} kcal"
+
+        f"\nDaily goal: {daily_goal} kcal | Net remaining: {net_remaining} kcal"
+
+    )
+
+    if meal_lines:
+
+        today_ctx += "\nMeals:\n" + "\n".join(meal_lines)
+
+    if workout_lines:
+
+        today_ctx += "\nWorkouts:\n" + "\n".join(workout_lines)
+
+
+
+    # Weekly summary (last 7 days, excluding today)
+
+    from datetime import date as _date
+
+    from collections import defaultdict
+
+    today_str = str(_date.today())
+
+    past_meals = [m for m in weekly_meals if not (m.get("eaten_at") or "").startswith(today_str)]
+
+    if past_meals:
+
+        by_day = defaultdict(list)
+
+        for m in past_meals:
+
+            day = (m.get("eaten_at") or "")[:10]
+
+            by_day[day].append(m)
+
+        weekly_lines = []
+
+        for day in sorted(by_day.keys(), reverse=True)[:6]:
+
+            day_meals = by_day[day]
+
+            day_cal = sum(m.get("calories_est", 0) or 0 for m in day_meals)
+
+            meal_descs = ", ".join(f"{m.get('meal_type','?')}:{(m.get('description') or '')[:20]}" for m in day_meals[:4])
+
+            weekly_lines.append(f"  {day}: {day_cal} kcal | {meal_descs}")
+
+        today_ctx += "\n\n[LAST 7 DAYS - meals]\n" + "\n".join(weekly_lines)
+
+
+
+    past_workouts = [w for w in weekly_workouts if not (w.get("logged_at") or "").startswith(today_str)]
+
+    if past_workouts:
+
+        wo_lines = []
+
+        for w in past_workouts[:5]:
+
+            day = (w.get("logged_at") or "")[:10]
+
+            wo_lines.append(f"  {day}: {w.get('workout_type','?')} | {(w.get('description') or '')[:30]} | {w.get('calories_burned',0)} kcal")
+
+        today_ctx += "\n\n[LAST 7 DAYS - workouts]\n" + "\n".join(wo_lines)
+
+
+
+    system = PROCESS_SYSTEM + _build_profile_context(user, memories) + today_ctx
+
+
+
+    # Build message content (text or text + image)
+
+    if photo_path:
+
+        try:
+
+            with open(photo_path, "rb") as f:
+
+                img_data = base64.standard_b64encode(f.read()).decode("utf-8")
+
+            ext = photo_path.rsplit(".", 1)[-1].lower()
+
+            media_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
+
+                          "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+
+            content = [
+
+                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}},
+
+                {"type": "text", "text": text or "Registr?? esta comida."},
+
+            ]
+
+        except Exception as e:
+
+            import logging
+
+            logging.getLogger(__name__).error(f"[ai] photo read error: {e}")
+
+            content = text or "No pude leer la foto."
+
+    else:
+
+        content = text
+
+
+
+    messages = history + [{"role": "user", "content": content}]
+
+
+
+    try:
+
+        client = get_client()
+
+        resp = await client.messages.create(
+
+            model=MODEL,
+
+            max_tokens=600,
+
+            system=system,
+
+            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL, SET_REMINDER_TOOL, SAVE_MEMORY_TOOL],
+
+            messages=messages,
+
+        )
+
+        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
+
+
+
+        for block in resp.content:
+
+            if block.type != "tool_use":
+
+                continue
+
+            text_reply = next((b.text for b in resp.content if hasattr(b, "text")), None)
+
+            if block.name == "log_meal":
+
+                return {"type": "meal", "meal": block.input, "reply": text_reply}
+
+            if block.name == "log_workout":
+
+                return {"type": "workout", "workout": block.input, "reply": text_reply}
+
+            if block.name == "update_user_identity":
+
+                return {"type": "identity_update", "update": block.input, "reply": text_reply}
+
+            if block.name == "delete_meal":
+
+                return {"type": "delete_meal", "meal_ids": block.input.get("meal_ids", []), "reply": text_reply}
+
+            if block.name == "set_reminder":
+
+                return {"type": "set_reminder", "time_str": block.input.get("time_str", ""), "message": block.input.get("message", ""), "reply": text_reply}
+
+            if block.name == "save_memory":
+
+                return {"type": "save_memory", "content": block.input.get("content", ""), "category": block.input.get("category", "general"), "reply": text_reply}
+
+
+
+        reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
+
+        return {"type": "text", "content": reply.strip()}
+
+
+
+    except Exception as e:
+
+        import logging
+
+        logging.getLogger(__name__).error(f"[ai] process_message error: {e}")
+
+        return {"type": "text", "content": "Uy, tuve un problemita t??cnico ???? Intent?? de nuevo en un momento."}
+
+
+
+
+
+async def generate_proactive_message(
+
+    user: dict,
+
+    trigger: str,
+
+    trigger_info: dict,
+
+    today_meals: list,
+
+    today_workouts: list,
+
+    daily_goal: int,
+
+) -> str:
+
+    """
+
+    Generate a context-aware proactive message for the scheduler.
+
+
+
+    trigger values:
+
+      "pre_meal"         ??? ~30 min before usual meal time
+
+      "meal_followup"    ??? ~45 min after usual meal time, meal not logged
+
+      "workout_checkin"  ??? ~20 min after usual workout end, workout not logged
+
+    """
+
+    profile_ctx = _build_profile_context(user)
+
+
+
+    total_cal    = sum(m.get("calories_est",   0) or 0 for m in today_meals)
+
+    total_burned = sum(w.get("calories_burned", 0) or 0 for w in today_workouts)
+
+    remaining    = max(0, daily_goal + total_burned - total_cal)
+
+
+
+    meal_lines = [
+
+        f"  {(m.get('eaten_at') or '')[:16]} | {m.get('meal_type','?')} | {(m.get('description') or '')[:40]} | ~{m.get('calories_est',0)} kcal"
+
+        for m in today_meals
+
+    ]
+
+    workout_lines = [
+
+        f"  {(w.get('logged_at') or '')[:16]} | {w.get('workout_type','?')} | {(w.get('description') or '')[:40]} | ~{w.get('calories_burned',0)} kcal"
+
+        for w in today_workouts
+
+    ]
+
+
+
+    today_ctx = (
+
+        f"\n[TODAY: {total_cal} kcal eaten / {total_burned} kcal burned / {remaining} kcal net remaining]"
+
+        + ("\nMeals:\n" + "\n".join(meal_lines) if meal_lines else "\nNo meals logged yet.")
+
+        + ("\nWorkouts:\n" + "\n".join(workout_lines) if workout_lines else "\nNo workouts logged yet.")
+
+    )
+
+
+
+    if trigger == "pre_meal":
+
+        meal_type = trigger_info.get("meal_type", "comida")
+
+        meal_names = {"breakfast": "desayuno", "lunch": "almuerzo", "dinner": "cena", "snack": "merienda"}
+
+        meal_name = meal_names.get(meal_type, meal_type)
+
+        instruction = (
+
+            f"Send a SHORT pre-meal reminder for {meal_name} (in ~30 min). "
+
+            f"Use today's context: mention calories burned if they trained, suggest what kind of food would be ideal given their remaining goal. "
+
+            f"Be specific, not generic. Max 2-3 lines."
+
+        )
+
+    elif trigger == "meal_followup":
+
+        meal_type = trigger_info.get("meal_type", "comida")
+
+        meal_names = {"breakfast": "desayuno", "lunch": "almuerzo", "dinner": "cena", "snack": "merienda"}
+
+        meal_name = meal_names.get(meal_type, meal_type)
+
+        instruction = (
+
+            f"The user usually has {meal_name} around this time but hasn't logged it. "
+
+            f"Ask casually if they already ate ??? keep it very short, 1 line max."
+
+        )
+
+    elif trigger == "workout_checkin":
+
+        workout_type = trigger_info.get("workout_type", "entrenamiento")
+
+        instruction = (
+
+            f"The user usually does {workout_type} around this time and hasn't logged it today. "
+
+            f"Ask if they trained, in a casual friendly way. If they confirm, they can tell you how it went and you'll log it. "
+
+            f"Max 2 lines. Don't be pushy."
+
+        )
+
+    else:
+
+        instruction = "Send a short friendly check-in about how their nutrition is going today. Max 2 lines."
+
+
+
+    system = (
+
+        "You are Coach Kai, a warm personal nutrition coach. "
+
+        "Speak in Argentine Spanish (rioplatense, 'vos'). Be concise and natural.\n"
+
+        + profile_ctx + today_ctx
+
+    )
+
+    return await _ask([{"role": "user", "content": instruction}], system=system)
+
+
+
+
+
+async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_goal: int) -> str:
+
+    pct = int(total_cal / daily_goal * 100) if daily_goal else 0
+
+    meal_list = ", ".join(
+
+        f"{m.get('meal_type', 'comida')} (~{m.get('calories_est', 0)} kcal)" for m in meals
+
+    )
+
+    prompt = (
+
+        f"Hac?? un resumen diario de alimentaci??n para {user['name']}.\n"
+
+        f"Comidas: {meal_list}\n"
+
+        f"Total: {total_cal} kcal ({pct}% de meta diaria de {daily_goal} kcal)\n"
+
+        f"Objetivo: {user['goal']}\n\n"
+
+        "Resumen en 2-3 oraciones: qu?? comi??, si estuvo bien, un aliento para ma??ana. "
+
+        "Agreg?? 1-2 emojis relevantes."
+
+    )
+
+    return await _ask([{"role": "user", "content": prompt}])
+
+
+
+
+
+
+
+
+
+async def generate_daily_summary(user: dict, meals: list) -> str:
+
+    if not meals:
+
+        return None
+
+    total_cal = sum(m.get("calories_est", 0) or 0 for m in meals)
+
+    meal_list = ", ".join(
+
+        f"{m.get('meal_type', 'comida')} (~{m.get('calories_est', 0)} kcal)" for m in meals
+
+    )
+
+    prompt = (
+
+        f"Hac?? un resumen diario de alimentaci??n para {user['name']}.\n"
+
+        f"Comidas del d??a: {meal_list}\n"
+
+        f"Total estimado: {total_cal} kcal\n"
+
+        f"Objetivo del usuario: {user['goal']}\n\n"
+
+        "Resumen en 3-4 oraciones: qu?? comi??, si estuvo bien para su objetivo, un aliento para ma??ana."
+
+    )
+
+    return await _ask([{"role": "user", "content": prompt}])
+
