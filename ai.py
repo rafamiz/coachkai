@@ -1030,6 +1030,7 @@ MEAL DELETION (use delete_meal tool):
 REMINDERS (use set_reminder tool):
 
 - ONLY call set_reminder when the user EXPLICITLY asks: 'avisame a las X', 'recordame a las X', 'mandáme un mensaje a las X'
+- ALWAYS convert the time to HH:MM 24h format yourself before calling set_reminder. 'Las 4 y cuarto' = '16:15', '9 y media' = '09:30' or '21:30' depending on context.
 - If user just mentions what time they'll eat or do something without asking for a reminder, do NOT call set_reminder
 - For future WORKOUTS/TRAINING only: proactively set a pre-workout nutrition reminder ~30 min before:
   * 'voy a entrenar a las 18' → set reminder at 17:30 suggesting a light pre-workout snack
@@ -1449,7 +1450,7 @@ SET_REMINDER_TOOL = {
 
 
 
-                "description": "Time as HH:MM (24h format, Argentina time). E.g. '16:51'"
+                "description": "Time for the reminder in HH:MM 24-hour format. ALWAYS convert natural language to HH:MM before calling this tool. Examples: 'las 4 y cuarto' \u2192 '16:15', 'las 9 y media de la ma\u00f1ana' \u2192 '09:30', '4 menos cuarto' \u2192 '15:45', 'mediodia' \u2192 '12:00', 'las 9 de la noche' \u2192 '21:00'. Argentina context: afternoon times (after noon) without AM/PM specification should be treated as PM (e.g., 'las 4' during afternoon = '16:00')."
 
 
 
