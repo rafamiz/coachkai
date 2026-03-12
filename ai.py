@@ -2907,6 +2907,11 @@ async def generate_checkin_message(user: dict, trigger: str, memories: list = No
             f"It's {time_str} in Argentina. Send a dinner check-in. "
             "Ask about their day and what they're planning to eat tonight."
         ),
+        "afternoon": (
+            f"It's {time_str} in Argentina (afternoon). Send a casual check-in \u2014 "
+            "ask about a snack, afternoon energy, if they're planning to work out, "
+            "or what they'll have for dinner later."
+        ),
         "inactivity": (
             f"It's {time_str} in Argentina. The user hasn't messaged in 3+ hours. "
             "Send a casual check-in \u2014 ask how they're doing, if they ate, "

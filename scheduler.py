@@ -424,26 +424,7 @@ async def send_meal_checkin(meal_type: str):
         tid = user["telegram_id"]
         uid = user.get("id", 0)
 
-        # Don't send if user already logged a meal in the last 2 hours
-        today_meals = db.get_today_meals(tid)
-        if today_meals:
-            last_meal_time_str = today_meals[-1].get("eaten_at") or ""
-            try:
-                last_meal_dt = datetime.fromisoformat(last_meal_time_str.replace("Z", "+00:00"))
-                if last_meal_dt.tzinfo is None:
-                    last_meal_dt = tz.localize(last_meal_dt)
-                if (now - last_meal_dt.astimezone(tz)).total_seconds() < 7200:
-                    continue  # ate recently, skip
-            except Exception:
-                pass
-
-        # Don't send if user already logged THIS meal type today
-        if meal_type in ("breakfast", "lunch", "dinner"):
-            meal_type_logged = [m for m in today_meals if m.get("meal_type") == meal_type]
-            if meal_type_logged:
-                continue  # already logged this meal type today, skip
-
-        # Don't send if user messaged in the last 60 minutes
+        # Skip if user was active recently (already in conversation)
         last_seen = db.get_last_seen(tid)
         if last_seen:
             try:
@@ -455,16 +436,24 @@ async def send_meal_checkin(meal_type: str):
             except Exception:
                 pass
 
+        # Don't send if user already logged THIS meal type today
+        if meal_type in ("breakfast", "lunch", "dinner"):
+            today_meals = db.get_today_meals(tid)
+            if any(m.get("meal_type") == meal_type for m in today_meals):
+                continue  # already logged this meal type today, skip
+
         # Check daily limit - don't spam
         followup_key = f"{meal_type}_checkin_{now.strftime('%Y-%m-%d')}"
         if db.already_sent_followup_today(uid, followup_key):
             continue
 
+        # Mark as sent BEFORE sending to prevent duplicates on retry
+        db.add_followup(uid, followup_key, followup_key)
+
         try:
             memories = db.get_memories(tid, limit=10)
             msg = await ai.generate_checkin_message(user, meal_type, memories)
             await _bot_app.bot.send_message(chat_id=tid, text=msg)
-            db.add_followup(uid, followup_key, followup_key)
             logger.info(f"[scheduler] Sent {meal_type} checkin to {tid}")
         except Exception as e:
             logger.error(f"[scheduler] {meal_type} checkin error for {tid}: {e}")
@@ -508,10 +497,21 @@ async def send_inactivity_checkin():
             if db.already_sent_followup_today(uid, followup_key):
                 continue
 
-            memories = db.get_memories(tid, limit=10)
-            msg = await ai.generate_checkin_message(user, "inactivity", memories)
-            await _bot_app.bot.send_message(chat_id=tid, text=msg)
+            # Mark as sent BEFORE sending to prevent duplicates on retry
             db.add_followup(uid, followup_key, followup_key)
+
+            memories = db.get_memories(tid, limit=10)
+            # Pick the right trigger based on current hour
+            if 6 <= now.hour < 12:
+                inactivity_trigger = "breakfast"
+            elif 12 <= now.hour < 16:
+                inactivity_trigger = "lunch"
+            elif 16 <= now.hour < 20:
+                inactivity_trigger = "afternoon"
+            else:
+                inactivity_trigger = "dinner"
+            msg = await ai.generate_checkin_message(user, inactivity_trigger, memories)
+            await _bot_app.bot.send_message(chat_id=tid, text=msg)
             logger.info(f"[scheduler] Sent inactivity checkin to {tid} ({hours_inactive:.1f}h inactive)")
         except Exception as e:
             logger.error(f"[scheduler] inactivity checkin error for {tid}: {e}")
