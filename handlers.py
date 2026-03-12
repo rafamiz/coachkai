@@ -1,1402 +1,578 @@
 import os
-
-
 import logging
+from datetime import datetime, timedelta
 
-
-from datetime import datetime
-
-
-
-
-
+import pytz
 from telegram import Update
-
-
 from telegram.ext import ContextTypes
 
-
-
-
-
 import ai
-
-
 import db
-
-
 import charts as charts_module
-
-
 import scheduler as sched_module
-
-
-
-
 
 logger = logging.getLogger(__name__)
 
+_BA_TZ = pytz.timezone("America/Argentina/Buenos_Aires")
 
 
-
-
-
-
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _onboarding_url(telegram_id: int) -> str:
-
-
     token = db.create_onboarding_token(telegram_id)
-
-
     base_url = os.environ.get("WEB_BASE_URL", "http://localhost:8080")
-
-
     return f"{base_url}/onboarding/{token}"
 
 
+def _daily_goal(user: dict) -> int:
+    """Estimate daily calorie goal based on user profile (Mifflin-St Jeor male)."""
+    weight = user.get("weight_kg") or 70
+    height = user.get("height_cm") or 170
+    age = user.get("age") or 25
+    goal = user.get("goal", "maintain")
+    activity = user.get("activity_level", "moderate")
+
+    bmr = 10 * weight + 6.25 * height - 5 * age + 5
+    activity_mult = {
+        "sedentary": 1.2,
+        "light": 1.375,
+        "lightly_active": 1.375,
+        "moderate": 1.55,
+        "active": 1.725,
+        "very_active": 1.9,
+    }
+    tdee = bmr * activity_mult.get(activity, 1.55)
+
+    if goal == "lose_weight":
+        tdee -= 400
+    elif goal == "gain_muscle":
+        tdee += 300
+
+    return int(tdee)
 
 
+# ---------------------------------------------------------------------------
+# Meal helper
+# ---------------------------------------------------------------------------
 
+async def _save_and_reply_meal(update: Update, user: dict, result: dict):
+    """Save a meal to the DB and send the formatted reply."""
+    meal = result.get("meal", result)
 
+    detected = (
+        meal.get("detected_food")
+        or meal.get("description")
+        or meal.get("detected", "comida")
+    )
+    calories = meal.get("calories_est") or meal.get("calories", 0) or 0
+    proteins = float(meal.get("proteins_g", 0) or 0)
+    carbs = float(meal.get("carbs_g", 0) or 0)
+    fats = float(meal.get("fats_g", 0) or 0)
+    meal_type = meal.get("meal_type", "snack")
 
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
+    try:
+        calories = int(calories)
+    except (ValueError, TypeError):
+        calories = 0
 
     telegram_id = update.effective_user.id
 
+    db.add_meal(
+        user_id=user["id"],
+        telegram_id=telegram_id,
+        description=detected[:500],
+        photo_path="",
+        calories_est=calories,
+        meal_type=meal_type,
+        claude_analysis="",
+        proteins_g=proteins,
+        carbs_g=carbs,
+        fats_g=fats,
+    )
 
-    db.upsert_user(telegram_id, onboarding_complete=0)
+    today_meals = db.get_today_meals(telegram_id)
+    total_cal = sum(m.get("calories_est", 0) or 0 for m in today_meals)
+    daily_goal = _daily_goal(user)
 
+    tip = result.get("tip") or meal.get("tip", "")
 
-    context.user_data.clear()
-
-
-
-
-
-    await update.message.reply_text("???????? *Bienvenido a Coach Kai*\n_Tu coach personal de nutrici????n_", parse_mode="Markdown")
-
-
-    await update.message.chat.send_action("typing")
-
-
-
-
-
-    result = await ai.intake_turn([], "Hi, I just started using the app.")
-
-
-    reply = result.get("reply", "")
-
-
-
-
-
-    intake_history = [
-
-
-        {"role": "user", "content": "Hi, I just started using the app."},
-
-
-        {"role": "assistant", "content": reply},
-
-
+    lines = [
+        f"\u2705 *{detected}* \u2014 ~{calories} kcal",
+        f"\U0001f969 {proteins:.0f}g prot  \U0001f33e {carbs:.0f}g carbos  \U0001fab2 {fats:.0f}g grasa",
+        f"\U0001f4ca Hoy: {total_cal} / {daily_goal} kcal",
     ]
+    if tip:
+        lines.append(f"\n\U0001f4ac {tip}")
+
+    reply = "\n".join(lines)
+    try:
+        await update.message.reply_text(reply, parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text(reply.replace("*", "").replace("_", ""))
 
 
-    context.user_data["intake_history"] = intake_history
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    db.upsert_user(telegram_id, onboarding_complete=0)
+    context.user_data.clear()
+    url = _onboarding_url(telegram_id)
+    await update.message.reply_text(
+        "\U0001f33f *Bienvenido a Coach Kai*\n_Tu coach personal de nutrici\u00f3n_\n\n"
+        "Para empezar, complet\u00e1 tu perfil \u2014 solo tarda un minuto:\n\n"
+        f"{url}",
+        parse_mode="Markdown",
+    )
 
 
-    db.save_onboarding_history(telegram_id, intake_history)
+async def cmd_perfil(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    user = db.get_user(telegram_id)
+    if not user or not user.get("onboarding_complete"):
+        await update.message.reply_text(
+            "Todav\u00eda no configuraste tu perfil. Us\u00e1 /start para empezar."
+        )
+        return
+
+    goal_map = {
+        "lose_weight": "Bajar de peso",
+        "gain_muscle": "Ganar m\u00fasculo",
+        "maintain": "Mantener peso",
+        "eat_healthier": "Comer m\u00e1s sano",
+        "improve_health": "Mejorar salud",
+    }
+    activity_map = {
+        "sedentary": "Sedentario",
+        "light": "Actividad leve",
+        "lightly_active": "Actividad leve",
+        "moderate": "Moderado",
+        "active": "Activo",
+        "very_active": "Muy activo",
+    }
+
+    await update.message.reply_text(
+        f"\U0001f464 *Tu perfil*\n\n"
+        f"Nombre: {user.get('name', '?')}\n"
+        f"Edad: {user.get('age', '?')} a\u00f1os\n"
+        f"Peso: {user.get('weight_kg', '?')} kg\n"
+        f"Altura: {user.get('height_cm', '?')} cm\n"
+        f"Objetivo: {goal_map.get(user.get('goal', ''), user.get('goal', '?'))}\n"
+        f"Actividad: {activity_map.get(user.get('activity_level', ''), user.get('activity_level', '?'))}\n\n"
+        "_Para modificar tu perfil us\u00e1 /reset_",
+        parse_mode="Markdown",
+    )
 
 
+async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    user = db.get_user(telegram_id)
+    if not user or not user.get("onboarding_complete"):
+        await update.message.reply_text(
+            "Primero necesito conocerte \U0001f60a Us\u00e1 /start."
+        )
+        return
+
+    meals = db.get_today_meals(telegram_id)
+    if not meals:
+        await update.message.reply_text(
+            "Todav\u00eda no registraste ninguna comida hoy \U0001f37d\ufe0f "
+            "\u00a1Mand\u00e1me una foto o describ\u00ed qu\u00e9 comiste!"
+        )
+        return
+
+    await update.message.reply_text(
+        "Generando tu resumen del d\u00eda... \U0001f4ca"
+    )
+
+    daily_goal = charts_module.estimate_daily_calories(user)
+    total_cal = sum(m.get("calories_est", 0) or 0 for m in meals)
+
+    try:
+        png_bytes = await charts_module.generate_daily_summary_chart(user, meals)
+        caption = await ai.generate_chart_caption(user, meals, total_cal, daily_goal)
+        await update.message.reply_photo(photo=png_bytes, caption=caption)
+    except Exception as e:
+        logger.error(f"[resumen] Chart error for {telegram_id}: {e}")
+        message = await ai.generate_daily_summary(user, meals)
+        if message:
+            await update.message.reply_text(message)
 
 
+async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    db.upsert_user(
+        telegram_id,
+        onboarding_complete=0,
+        name=None,
+        age=None,
+        weight_kg=None,
+        height_cm=None,
+        goal=None,
+        activity_level=None,
+    )
+    context.user_data.clear()
+    url = _onboarding_url(telegram_id)
+    await update.message.reply_text(
+        f"Perfecto, empezamos de cero \U0001f504\n\nComplet\u00e1 tu nuevo perfil ac\u00e1:\n\n{url}"
+    )
 
-    await update.message.reply_text(reply)
+
+async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete all meals registered today."""
+    telegram_id = update.effective_user.id
+    user = db.get_user(telegram_id)
+    if not user or not user.get("onboarding_complete"):
+        await update.message.reply_text(
+            "Primero configur\u00e1 tu perfil con /start."
+        )
+        return
+
+    today_meals = db.get_today_meals(telegram_id)
+    count = 0
+    for meal in today_meals:
+        if db.delete_meal_by_id(telegram_id, meal["id"]):
+            count += 1
+
+    if count > 0:
+        plural = "s" if count > 1 else ""
+        await update.message.reply_text(
+            f"\U0001f5d1 Elimin\u00e9 {count} comida{plural} de hoy. Empez\u00e1s de cero."
+        )
+    else:
+        await update.message.reply_text(
+            "No hab\u00eda comidas registradas hoy."
+        )
 
 
-
-
-
-
+async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    user = db.get_user(telegram_id)
+    if not user or not user.get("onboarding_complete"):
+        await update.message.reply_text(
+            "Primero configur\u00e1 tu perfil con /start."
+        )
+        return
+    deleted = db.delete_last_meal(telegram_id)
+    if deleted:
+        await update.message.reply_text(
+            f"\U0001f5d1 Elimin\u00e9 tu \u00faltima comida registrada: _{deleted}_",
+            parse_mode="Markdown",
+        )
+    else:
+        await update.message.reply_text(
+            "No encontr\u00e9 comidas registradas para eliminar."
+        )
 
 
 async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     user = db.get_user(telegram_id)
     if not user or not user.get("onboarding_complete"):
-        await update.message.reply_text("Primero necesito conocerte \U0001f60a Us\u00e1 /start para empezar.")
+        await update.message.reply_text(
+            "Primero necesito conocerte un poco \U0001f60a Us\u00e1 /start para empezar."
+        )
         return
-    await update.message.reply_text("Armando tu plan personalizado... \U0001f957 (en unos segundos te mando el PDF)")
+    await update.message.reply_text(
+        "Armando tu plan personalizado... \U0001f957 (en unos segundos te mando el PDF)"
+    )
     plan = await ai.generate_meal_plan(user)
-    # Send text summary
     summary = plan.get("summary", "") if isinstance(plan, dict) else str(plan)
-    cal = plan.get("calories", 0) if isinstance(plan, dict) else 0
-    tips = plan.get("tips", []) if isinstance(plan, dict) else []
-    msg = f"\U0001f4ca *Tu plan personalizado*\n\n{summary}"
-    if cal:
-        msg += f"\n\n\U0001f525 *Objetivo diario:* {cal} kcal"
-    if tips:
-        msg += "\n\n\U0001f4a1 *Tips clave:*\n" + "\n".join(f"\u2022 {t}" for t in tips)
-    await update.message.reply_text(msg, parse_mode="Markdown")
-    # Generate and send PDF
+    await update.message.reply_text(summary)
     try:
         import pdf_generator
         from io import BytesIO
+
         pdf_bytes = pdf_generator.generate_plan_pdf(user, plan)
+        name_slug = (user.get("name", "usuario") or "usuario").lower().replace(" ", "_")
         await update.message.reply_document(
             document=BytesIO(pdf_bytes),
-            filename=f"plan_coachkai_{user.get('name', 'usuario').lower().replace(' ', '_')}.pdf",
-            caption="\U0001f4cb Tu plan de alimentaci\u00f3n personalizado - Coach Kai"
+            filename=f"plan_kai_{name_slug}.pdf",
+            caption="\U0001f4c4 Tu plan de alimentaci\u00f3n personalizado \u2014 Coach Kai",
         )
     except Exception as e:
         logger.error(f"PDF generation error: {e}")
 
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-
     telegram_id = update.effective_user.id
-
-
     user = db.get_user(telegram_id)
-
-
     if not user or not user.get("onboarding_complete"):
-
-
-        await update.message.reply_text("Primero necesito conocerte ???????? Us???? /start.")
-
-
+        await update.message.reply_text(
+            "Primero necesito conocerte \U0001f60a Us\u00e1 /start."
+        )
         return
-
-
-
-
 
     meals = db.get_today_meals(telegram_id)
-
-
     if not meals:
-
-
-        await update.message.reply_text("Todav????a no registraste ninguna comida hoy ?????????????? ????Mandame una foto o describ???? lo que com????s!")
-
-
+        await update.message.reply_text(
+            "Todav\u00eda no registraste ninguna comida hoy \U0001f37d\ufe0f "
+            "\u00a1Mand\u00e1me una foto o describ\u00ed lo que com\u00e9s!"
+        )
         return
 
-
-
-
-
     total_cal = sum(m.get("calories_est", 0) or 0 for m in meals)
-
-
     total_prot = sum(float(m.get("proteins_g", 0) or 0) for m in meals)
-
-
     daily_goal = charts_module.estimate_daily_calories(user)
-
-
     pct = round(total_cal / daily_goal * 100) if daily_goal else 0
-
-
     remaining = max(0, daily_goal - total_cal)
 
-
-
-
-
-    meal_type_names = {"breakfast": "Desayuno", "lunch": "Almuerzo", "dinner": "Cena", "snack": "Merienda"}
-
-
-    lines = [f"????????? *{user['name']} ???????? hoy*\n"]
-
-
+    meal_type_names = {
+        "breakfast": "Desayuno",
+        "lunch": "Almuerzo",
+        "dinner": "Cena",
+        "snack": "Merienda",
+    }
+    lines = [f"\U0001f4ca *{user['name']} \u2014 hoy*\n"]
     for m in meals:
-
-
         try:
-
-
             t = datetime.fromisoformat(m["eaten_at"]).strftime("%H:%M")
-
-
         except Exception:
-
-
             t = "?"
-
-
         cal = m.get("calories_est", 0) or 0
-
-
         tipo = meal_type_names.get(m.get("meal_type", ""), "Comida")
-
-
         desc = (m.get("description", "") or "")[:35]
-
-
-        lines.append(f"??????? {t} {tipo}: {desc} (~{cal} kcal)")
-
-
-
-
-
-    # Progress bar
-
+        lines.append(f"\u2022 {t} {tipo}: {desc} (~{cal} kcal)")
 
     filled = min(10, pct // 10)
-
-
-    bar = "???????" * filled + "????????" * (10 - filled)
-
-
-    lines.append(f"\n????????? *{total_cal} / {daily_goal} kcal* [{bar}] {pct}%")
-
-
-    lines.append(f"???????? Prote????na acumulada: *{total_prot:.0f}g*")
-
-
+    bar = "\u2588" * filled + "\u2591" * (10 - filled)
+    lines.append(f"\n\U0001f525 *{total_cal} / {daily_goal} kcal* [{bar}] {pct}%")
+    lines.append(f"\U0001f969 Prote\u00edna acumulada: *{total_prot:.0f}g*")
     if remaining > 0:
-
-
-        lines.append(f"?????????? Te quedan ~{remaining} kcal para hoy")
-
-
+        lines.append(f"\U0001f4c9 Te quedan ~{remaining} kcal para hoy")
     else:
-
-
-        lines.append("??????? ????Ya alcanzaste tu meta cal????rica de hoy!")
-
-
-
-
+        lines.append("\u2705 \u00a1Ya alcanzaste tu meta cal\u00f3rica de hoy!")
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
-
-
-
-
-
-
-async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-
-    telegram_id = update.effective_user.id
-
-
-    db.upsert_user(telegram_id, onboarding_complete=0, name=None, age=None,
-
-
-                   weight_kg=None, height_cm=None, goal=None, activity_level=None,
-
-
-                   profile_text=None, onboarding_history=None)
-
-
-    context.user_data.clear()
-
-
-    await cmd_start(update, context)
-
-
-
-
-
-
-
-
-async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-
-    telegram_id = update.effective_user.id
-
-
-    user = db.get_user(telegram_id)
-
-
-    if not user or not user.get("onboarding_complete"):
-
-
-        await update.message.reply_text("Primero necesito conocerte ???????? Us???? /start.")
-
-
-        return
-
-
-
-
-
-    meals = db.get_today_meals(telegram_id)
-
-
-    if not meals:
-
-
-        await update.message.reply_text("Todav????a no registraste ninguna comida hoy ?????????????? ????Mandame una foto o describ???? qu???? comiste!")
-
-
-        return
-
-
-
-
-
-    await update.message.reply_text("Generando tu resumen del d????a... ?????????")
-
-
-
-
-
-    daily_goal = charts_module.estimate_daily_calories(user)
-
-
-    total_cal = sum(m.get("calories_est", 0) or 0 for m in meals)
-
-
-
-
-
-    try:
-
-
-        png_bytes = await charts_module.generate_daily_summary_chart(user, meals)
-
-
-        caption = await ai.generate_chart_caption(user, meals, total_cal, daily_goal)
-
-
-        await update.message.reply_photo(photo=png_bytes, caption=caption)
-
-
-    except Exception as e:
-
-
-        logger.error(f"[resumen] Chart error for {telegram_id}: {e}")
-
-
-        message = await ai.generate_daily_summary(user, meals)
-
-
-        if message:
-
-
-            await update.message.reply_text(message)
-
-
-
-
-
-
-
-
-async def handle_intake_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-
-    telegram_id = update.effective_user.id
-
-
-    text = update.message.text.strip()
-
-
-
-
-
-    # Load history from memory or DB
-
-
-    intake_history = context.user_data.get("intake_history")
-
-
-    if intake_history is None:
-
-
-        intake_history = db.get_onboarding_history(telegram_id)
-
-
-        if not intake_history:
-
-
-            await cmd_start(update, context)
-
-
-            return
-
-
-        context.user_data["intake_history"] = intake_history
-
-
-
-
-
-    await update.message.chat.send_action("typing")
-
-
-    result = await ai.intake_turn(intake_history, text)
-
-
-
-
-
-    intake_history = intake_history + [{"role": "user", "content": text}]
-
-
-    if result.get("reply"):
-
-
-        intake_history = intake_history + [{"role": "assistant", "content": result["reply"]}]
-
-
-
-
-
-    context.user_data["intake_history"] = intake_history
-
-
-    db.save_onboarding_history(telegram_id, intake_history)
-
-
-
-
-
-    if result["done"]:
-
-
-        profile = result["profile"]
-
-
-        db.upsert_user(
-
-
-            telegram_id,
-
-
-            name=profile["name"],
-
-
-            age=profile["age"],
-
-
-            weight_kg=profile["weight_kg"],
-
-
-            height_cm=profile["height_cm"],
-
-
-            goal=profile["goal"],
-
-
-            activity_level=profile["activity_level"],
-
-
-            onboarding_complete=1,
-
-
-            onboarding_history=None,
-
-
-        )
-
-
-        db.save_profile_text(telegram_id, profile["identity_markdown"])
-
-
-
-
-
-        context.user_data.pop("intake_history", None)
-
-
-        context.user_data["history"] = []
-
-
-
-
-
-        if result.get("reply"):
-
-
-            await update.message.reply_text(result["reply"])
-
-
-
-
-
-        full_user = db.get_user(telegram_id)
-
-
-        welcome = await ai.onboarding_welcome(profile["name"])
-
-
-        await update.message.reply_text(welcome)
-
-
-
-
-
-        plan = await ai.generate_meal_plan(full_user)
-
-
-        await update.message.reply_text(plan)
-
-
-        try:
-
-
-            import pdf_generator
-
-
-            from io import BytesIO
-
-
-            pdf_bytes = pdf_generator.generate_plan_pdf(full_user, plan)
-
-
-            await update.message.reply_document(
-
-
-                document=BytesIO(pdf_bytes),
-
-
-                filename=f"plan_coachkai_{profile['name'].lower().replace(' ', '_')}.pdf",
-
-
-                caption="?????????? Tu plan de alimentaci????n personalizado ???????? Coach Kai"
-
-
-            )
-
-
-        except Exception as e:
-
-
-            logger.error(f"PDF error post-intake: {e}")
-
-
-    else:
-
-
-        await update.message.reply_text(result["reply"])
-
-
-
-
-
-
-
+async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "\U0001f957 *Coach Kai \u2014 Comandos disponibles*\n\n"
+        "\U0001f4dd *Registrar comida:* mand\u00e1 lo que comiste en texto o foto\n"
+        "   _Ej: 'com\u00ed 200g de pollo con ensalada'_\n\n"
+        "/plan \u2014 Ver tu plan de alimentaci\u00f3n personalizado\n"
+        "/stats \u2014 Ver estad\u00edsticas del d\u00eda\n"
+        "/resumen \u2014 Gr\u00e1fico nutricional del d\u00eda\n"
+        "/perfil \u2014 Ver tu perfil actual\n"
+        "/limpiar \u2014 Eliminar todas las comidas de hoy\n"
+        "/borrar \u2014 Eliminar la \u00faltima comida registrada\n"
+        "/reset \u2014 Reiniciar tu perfil desde cero\n"
+        "/ayuda \u2014 Mostrar este men\u00fa",
+        parse_mode="Markdown",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main message handler
+# ---------------------------------------------------------------------------
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-
     if not update.message or not update.message.text:
-
-
         return
-
-
-
-
 
     telegram_id = update.effective_user.id
-
-
     text = update.message.text.strip()
 
-
-
-
-
     user = db.get_user(telegram_id)
-
-
     if not user or not user.get("onboarding_complete"):
-
-
-        await handle_intake_message(update, context)
-
-
+        await update.message.reply_text(
+            "Hola \U0001f44b Us\u00e1 /start para configurar tu perfil."
+        )
         return
 
-
-
-
-
+    # Maintain conversation history (keep last 100 messages)
     history = context.user_data.get("history", [])
-
-
-
-
+    history = history + [{"role": "user", "content": text}]
+    context.user_data["history"] = history[-100:]
 
     await update.message.chat.send_action("typing")
-
-
     ai.reset_turn_cost()
+    result = await ai.process_message(text, user, history[:-1])
 
-
-    result = await ai.process_message(text, user, history)
-
-
-
-
-
-    history = history + [{"role": "user", "content": text}]
-
-
-
-
+    reply = None
 
     if result["type"] == "meal":
-
-
-        if result.get("reply"):
-
-
-            history = history + [{"role": "assistant", "content": result["reply"]}]
-
-
+        await _save_and_reply_meal(update, user, result)
+        # update history with assistant reply summary
+        meal = result.get("meal", result)
+        detected = meal.get("detected_food") or meal.get("description") or meal.get("detected", "comida")
+        calories = meal.get("calories_est") or meal.get("calories", 0) or 0
+        summary = f"Registr\u00e9 tu comida: {detected} (~{calories} kcal)."
+        history = history + [{"role": "assistant", "content": summary}]
         context.user_data["history"] = history[-100:]
-
-
-        await _save_and_reply_meal(update, user, result["meal"])
-
-
-
-
+        return
 
     elif result["type"] == "workout":
+        workout = result.get("workout", {})
+        try:
+            db.add_workout(
+                user_id=user["id"],
+                telegram_id=telegram_id,
+                workout_type=workout.get("workout_type", "other"),
+                description=workout.get("description", ""),
+                duration_min=int(workout.get("duration_min", 0) or 0),
+                calories_burned=int(workout.get("calories_burned", 0) or 0),
+                intensity=workout.get("intensity", "moderate"),
+                distance_km=workout.get("distance_km"),
+                notes=workout.get("notes"),
+            )
+        except Exception as e:
+            logger.error(f"[handle_message] workout save error: {e}")
 
-
-        if result.get("reply"):
-
-
-            history = history + [{"role": "assistant", "content": result["reply"]}]
-
-
-        context.user_data["history"] = history[-100:]
-
-
-        await _save_and_reply_workout(update, user, result["workout"])
-
-
-
-
+        desc = workout.get("description", "tu entrenamiento")
+        burned = workout.get("calories_burned", 0) or 0
+        dur = workout.get("duration_min", 0) or 0
+        reply = (
+            result.get("reply")
+            or f"\U0001f4aa *{desc}* \u2014 {dur} min, ~{burned} kcal quemadas. \u00a1Bien hecho!"
+        )
 
     elif result["type"] == "delete_meal":
         meal_ids = result.get("meal_ids", [])
-        deleted = 0
+        deleted_count = 0
         for mid in meal_ids:
             if db.delete_meal_by_id(telegram_id, mid):
-                deleted += 1
-        reply = result.get("reply") or (
-            f"\U0001f5d1 Elimin?? {deleted} comida{'s' if deleted != 1 else ''}." if deleted
-            else "No encontr?? esa comida para eliminar."
+                deleted_count += 1
+        if deleted_count:
+            plural = "s" if deleted_count > 1 else ""
+            reply = (
+                result.get("reply")
+                or f"\U0001f5d1 Listo, elimin\u00e9 {deleted_count} comida{plural} del registro."
+            )
+        else:
+            reply = result.get("reply") or "No encontr\u00e9 la comida para eliminar."
+
+    elif result["type"] == "identity_update":
+        update_data = result.get("update", {})
+        try:
+            kwargs = {}
+            if update_data.get("weight_kg"):
+                kwargs["weight_kg"] = update_data["weight_kg"]
+            if update_data.get("goal"):
+                kwargs["goal"] = update_data["goal"]
+            if update_data.get("activity_level"):
+                kwargs["activity_level"] = update_data["activity_level"]
+            if update_data.get("identity_markdown"):
+                db.save_profile_text(telegram_id, update_data["identity_markdown"])
+            if kwargs:
+                db.upsert_user(telegram_id, **kwargs)
+        except Exception as e:
+            logger.error(f"[handle_message] identity_update error: {e}")
+        reply = (
+            result.get("reply")
+            or "\u2705 Perfecto, actualic\u00e9 tu perfil."
         )
-        history = history + [{"role": "assistant", "content": reply}]
-        context.user_data["history"] = history[-100:]
-        await update.message.reply_text(reply)
 
     elif result["type"] == "set_reminder":
-        from datetime import datetime, timedelta
-        import pytz
-        time_str = result.get("time_str", "")
+        time_str_orig = result.get("time_str", "")
         message = result.get("message", "")
         try:
-            tz = pytz.timezone("America/Argentina/Buenos_Aires")
-            now = datetime.now(tz)
+            now = datetime.now(_BA_TZ)
+            time_str = time_str_orig.lower().replace("am", "").replace("pm", "").strip()
+            if ":" not in time_str:
+                time_str = time_str + ":00"
             h, m = map(int, time_str.split(":"))
+            # restore PM offset if original had it
+            if "pm" in time_str_orig.lower() and h < 12:
+                h += 12
             remind_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
             if remind_dt <= now:
                 remind_dt += timedelta(days=1)
             db.save_reminder(telegram_id, remind_dt.isoformat(), message)
-            reply = result.get("reply") or f"\u23f0 Listo, te aviso a las {time_str}."
+            reply = (
+                result.get("reply")
+                or f"\u23f0 Listo, te aviso a las {h:02d}:{m:02d}."
+            )
         except Exception as e:
-            logger.error(f"Reminder error: {e}")
-            reply = "No pude configurar el recordatorio. Intent\u00e1 de nuevo."
-        history = history + [{"role": "assistant", "content": reply}]
-        context.user_data["history"] = history[-100:]
-        await update.message.reply_text(reply)
+            logger.error(f"[handle_message] reminder parse error: {e}, time_str={time_str_orig!r}")
+            reply = (
+                "No entend\u00ed el horario. Dec\u00edme algo como "
+                "'avisame a las 9' o 'recordame a las 21:30'."
+            )
 
     elif result["type"] == "save_memory":
-        db.save_memory(telegram_id, result.get("content", ""), result.get("category", "general"))
-        reply = result.get("reply") or "\U0001f9e0 Anotado, no lo olvido."
-        history = history + [{"role": "assistant", "content": reply}]
-        context.user_data["history"] = history[-100:]
-        await update.message.reply_text(reply)
+        try:
+            db.save_memory(
+                telegram_id=telegram_id,
+                content=result.get("content", ""),
+                category=result.get("category", "general"),
+            )
+        except Exception as e:
+            logger.error(f"[handle_message] save_memory error: {e}")
+        reply = (
+            result.get("reply")
+            or "\U0001f9e0 Anotado, lo voy a recordar."
+        )
 
-    elif result["type"] == "identity_update":
-
-
-        upd = result["update"]
-
-
-        kwargs = {"profile_text": upd["identity_markdown"]}
-
-
-        if upd.get("weight_kg"):      kwargs["weight_kg"]      = upd["weight_kg"]
-
-
-        if upd.get("goal"):           kwargs["goal"]           = upd["goal"]
-
-
-        if upd.get("activity_level"): kwargs["activity_level"] = upd["activity_level"]
-
-
-        db.upsert_user(telegram_id, **kwargs)
-
-
-        db.save_profile_text(telegram_id, upd["identity_markdown"])
-
-
-        reply = result.get("reply") or "??????? Actualic???? tu perfil con la nueva info."
-
-
-        history = history + [{"role": "assistant", "content": reply}]
-
-
-        context.user_data["history"] = history[-100:]
-
-
-        await update.message.reply_text(reply)
-
-
-
-
+    elif result["type"] in ("chat", "text"):
+        reply = result.get("content", "")
 
     else:
+        reply = result.get("content", "No entend\u00ed. Pod\u00e9s repetirlo?")
+
+    if not reply:
+        reply = "No entend\u00ed. Pod\u00e9s repetirlo?"
+
+    history = history + [{"role": "assistant", "content": reply}]
+    context.user_data["history"] = history[-100:]
+
+    try:
+        await update.message.reply_text(reply, parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text(reply.replace("*", "").replace("_", ""))
 
 
-        response = result["content"]
-
-
-        history = history + [{"role": "assistant", "content": response}]
-
-
-        context.user_data["history"] = history[-100:]
-
-
-        await update.message.reply_text(response)
-
-
-
-
-
-
-
+# ---------------------------------------------------------------------------
+# Photo handler
+# ---------------------------------------------------------------------------
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-
     telegram_id = update.effective_user.id
-
-
     user = db.get_user(telegram_id)
-
-
     if not user or not user.get("onboarding_complete"):
-
-
-        await update.message.reply_text("Primero termin???? de contarme sobre vos ???????? ????Ya casi!")
-
-
+        await update.message.reply_text(
+            "Primero configur\u00e1 tu perfil con /start \U0001f60a"
+        )
         return
-
-
-
-
-
-    await update.message.reply_text("Analizando tu foto... ?????????")
-
-
-
-
-
-    photo = update.message.photo[-1]
-
-
-    file = await context.bot.get_file(photo.file_id)
-
-
-    os.makedirs("photos", exist_ok=True)
-
-
-    photo_path = f"photos/{telegram_id}_{photo.file_id}.jpg"
-
-
-    await file.download_to_drive(photo_path)
-
-
-
-
-
-    caption = update.message.caption or ""
-
-
-    history = context.user_data.get("history", [])
-
-
-
-
-
-    ai.reset_turn_cost()
-
-
-    result = await ai.process_message(
-
-
-        text=caption or "Log this meal from the photo.",
-
-
-        user=user,
-
-
-        history=history,
-
-
-        photo_path=photo_path,
-
-
-    )
-
-
-
-
-
-    history = history + [{"role": "user", "content": "[foto de comida]" + (f": {caption}" if caption else "")}]
-
-
-
-
-
-    if result["type"] == "meal":
-
-
-        meal = result["meal"]
-
-
-        if result.get("reply"):
-
-
-            history = history + [{"role": "assistant", "content": result["reply"]}]
-
-
-        context.user_data["history"] = history[-100:]
-
-
-        await _save_and_reply_meal(update, user, meal, photo_path=photo_path)
-
-
-    else:
-
-
-        response = result["content"]
-
-
-        history = history + [{"role": "assistant", "content": response}]
-
-
-        context.user_data["history"] = history[-100:]
-
-
-        await update.message.reply_text(response)
-
-
-
-
-
-
-
-
-async def _save_and_reply_meal(update: Update, user: dict, meal: dict, photo_path: str = None):
-
-
-    """Save a meal from a log_meal tool call and reply with a formatted summary."""
-
-
-    telegram_id = user["telegram_id"]
-
-
-    user_id = user["id"]
-
-
-
-
-
-    detected  = meal.get("detected_food", "tu comida")
-
-
-    meal_type = meal.get("meal_type", "snack")
-
-
-    tip       = meal.get("tip", "")
-
-
-    aligned   = meal.get("aligned_with_goal", "partial")
-
-
-
-
-
-    try:
-
-
-        calories = int(meal.get("calories", 0))
-
-
-    except (ValueError, TypeError):
-
-
-        calories = 0
-
-
-    proteins_g = float(meal.get("proteins_g", 0) or 0)
-
-
-    carbs_g    = float(meal.get("carbs_g",    0) or 0)
-
-
-    fats_g     = float(meal.get("fats_g",     0) or 0)
-
-
-
-
-
-    # Try Open Food Facts to improve accuracy
-
-
-    source_note = "???????????? _estimaci????n Kai_"
-
-
-    try:
-
-
-        import nutrition as nutr
-
-
-        off = await nutr.get_nutrition_for_meal(detected, "")
-
-
-        if off:
-
-
-            calories   = off["calories"]
-
-
-            proteins_g = off["proteins_g"]
-
-
-            carbs_g    = off["carbs_g"]
-
-
-            fats_g     = off["fats_g"]
-
-
-            detected   = off["food_name"]
-
-
-            source_note = "????????? _Open Food Facts_"
-
-
-    except Exception:
-
-
-        pass
-
-
-
-
-
-    db.add_meal(
-
-
-        user_id=user_id,
-
-
-        telegram_id=telegram_id,
-
-
-        description=detected[:500],
-
-
-        photo_path=photo_path or "",
-
-
-        calories_est=calories,
-
-
-        meal_type=meal_type,
-
-
-        claude_analysis=detected,
-
-
-        proteins_g=proteins_g,
-
-
-        carbs_g=carbs_g,
-
-
-        fats_g=fats_g,
-
-
-    )
-
-
-    sched_module.update_eating_schedule(user_id, meal_type)
-
-
-
-
-
-    # Format reply
-
-
-    aligned_icon = {"yes": "????????", "partial": "?????????", "no": "????????????"}.get(aligned, "?????????")
-
-
-    response = (
-
-
-        f"??????? *{detected}* ???? ~{calories} kcal\n"
-
-
-        f"???????? {proteins_g:.0f}g prote????na ???? ???????? {carbs_g:.0f}g carbos ???? ????????? {fats_g:.0f}g grasa\n"
-
-
-        f"{source_note}"
-
-
-    )
-
-
-    if tip:
-
-
-        response += f"\n{aligned_icon} {tip}"
-
-
-
-
-
-    cost = ai.get_turn_cost()
-
-
-    cost_line = f"\n\n_????????? ${cost:.5f} USD_"
-
-
-    try:
-
-
-        await update.message.reply_text(response + cost_line, parse_mode="Markdown")
-
-
-    except Exception:
-
-
-        await update.message.reply_text(response.replace("*", "").replace("_", "") + f"\n\n????????? ${cost:.5f} USD")
-
-
-
-
-
-
-
-
-async def _save_and_reply_workout(update: Update, user: dict, workout: dict):
-
-
-    """Save a workout from a log_workout tool call and reply with a formatted summary."""
-
-
-    telegram_id = user["telegram_id"]
-
-
-    user_id     = user["id"]
-
-
-
-
-
-    description    = workout.get("description", "entrenamiento")
-
-
-    workout_type   = workout.get("workout_type", "other")
-
-
-    intensity      = workout.get("intensity", "moderate")
-
-
-    notes          = workout.get("notes", "")
-
-
-    distance_km    = workout.get("distance_km")
-
-
-
-
-
-    try:
-
-
-        duration_min   = int(workout.get("duration_min", 0))
-
-
-        calories_burned = int(workout.get("calories_burned", 0))
-
-
-    except (ValueError, TypeError):
-
-
-        duration_min, calories_burned = 0, 0
-
-
-
-
-
-    db.add_workout(
-
-
-        user_id=user_id,
-
-
-        telegram_id=telegram_id,
-
-
-        workout_type=workout_type,
-
-
-        description=description[:500],
-
-
-        duration_min=duration_min,
-
-
-        calories_burned=calories_burned,
-
-
-        intensity=intensity,
-
-
-        distance_km=distance_km,
-
-
-        notes=notes,
-
-
-    )
-
-
-    sched_module.update_workout_schedule(user_id, workout_type)
-
-
-
-
-
-    intensity_icons = {"low": "????????", "moderate": "????????", "high": "?????????", "very_high": "?????????"}
-
-
-    icon = intensity_icons.get(intensity, "????????")
-
-
-    dist_str = f" ???? {distance_km:.1f} km" if distance_km else ""
-
-
-    response = (
-
-
-        f"{icon} *{description}*\n"
-
-
-        f"?????? {duration_min} min{dist_str} ???? ????????? ~{calories_burned} kcal quemadas"
-
-
-    )
-
-
-    if notes:
-
-
-        response += f"\n????????? {notes}"
-
-
-
-
-
-    cost = ai.get_turn_cost()
-
-
-    cost_line = f"\n\n_????????? ${cost:.5f} USD_"
-
-
-    try:
-
-
-        await update.message.reply_text(response + cost_line, parse_mode="Markdown")
-
-
-    except Exception:
-
-
-        await update.message.reply_text(response.replace("*", "").replace("_", "") + f"\n\n????????? ${cost:.5f} USD")
-
-
-
-
-
-
-
-
-async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
 
     await update.message.reply_text(
-
-
-        "????????? *Coach Kai ???????? Comandos disponibles*\n\n"
-
-
-        "????????? *Registrar comida:* mand???? lo que comiste en texto o foto\n"
-
-
-        "   _Ej: 'com???? 200g de pollo con ensalada'_\n\n"
-
-
-        "/plan ???????? Ver tu plan de alimentaci????n personalizado\n"
-
-
-        "/stats ???????? Ver estad????sticas del d????a\n"
-
-
-        "/resumen ???????? Gr????fico nutricional del d????a\n"
-
-
-        "/perfil ???????? Ver tu perfil actual\n"
-
-
-        "/borrar ???????? Eliminar la ????ltima comida registrada\n"
-
-
-        "/reset ???????? Reiniciar tu perfil desde cero\n"
-
-
-        "/ayuda ???????? Mostrar este men????",
-
-
-        parse_mode="Markdown"
-
-
+        "Analizando tu foto... \U0001f50d"
     )
 
+    photo = update.message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+    os.makedirs("photos", exist_ok=True)
+    photo_path = f"photos/{telegram_id}_{photo.file_id}.jpg"
+    await file.download_to_drive(photo_path)
 
+    caption = update.message.caption or "Registr\u00e1 esta comida."
 
+    history = context.user_data.get("history", [])
+    history = history + [{"role": "user", "content": "[foto de comida enviada]"}]
+    context.user_data["history"] = history[-100:]
 
+    await update.message.chat.send_action("typing")
+    ai.reset_turn_cost()
+    result = await ai.process_message(caption, user, history[:-1], photo_path=photo_path)
 
-
-
-
-async def cmd_perfil(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    telegram_id = update.effective_user.id
-
-    user = db.get_user(telegram_id)
-
-    if not user or not user.get("onboarding_complete"):
-
-        await update.message.reply_text("Todav\u00eda no configuraste tu perfil. Us\u00e1 /start para empezar.")
-
-        return
-
-
-
-    goal_map = {"lose_weight": "Bajar de peso", "gain_muscle": "Ganar m\u00fasculo",
-
-                "maintain": "Mantener peso", "improve_health": "Mejorar salud",
-
-                "eat_healthier": "Comer m\u00e1s sano"}
-
-    activity_map = {"sedentary": "Sedentario", "lightly_active": "Poco activo",
-
-                    "light": "Poco activo", "moderate": "Moderado",
-
-                    "active": "Activo", "very_active": "Muy activo"}
-
-
-
-    basic = (
-
-        f"\U0001f464 *Tu perfil*\n\n"
-
-        f"Nombre: {user.get('name', '?')}\n"
-
-        f"Edad: {user.get('age', '?')} a\u00f1os\n"
-
-        f"Peso: {user.get('weight_kg', '?')} kg\n"
-
-        f"Altura: {user.get('height_cm', '?')} cm\n"
-
-        f"Objetivo: {goal_map.get(user.get('goal', ''), user.get('goal', '?'))}\n"
-
-        f"Actividad: {activity_map.get(user.get('activity_level', ''), user.get('activity_level', '?'))}"
-
-    )
-
-
-
-    profile_text = user.get("profile_text", "")
-
-    if profile_text:
-
-        basic += f"\n\n\U0001f4dd *Lo que s\u00e9 de vos:*\n{profile_text[:800]}"
-
+    if result["type"] == "meal":
+        await _save_and_reply_meal(update, user, result)
+        meal = result.get("meal", result)
+        detected = meal.get("detected_food") or meal.get("description") or meal.get("detected", "comida")
+        calories = meal.get("calories_est") or meal.get("calories", 0) or 0
+        summary = f"Analiz\u00e9 la foto: {detected} (~{calories} kcal)."
     else:
+        reply = result.get("content", "No pude analizar la foto. Intent\u00e1 de nuevo.")
+        summary = reply
+        try:
+            await update.message.reply_text(reply, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(reply.replace("*", "").replace("_", ""))
 
-        basic += "\n\n\u26a0\ufe0f _No tengo tu perfil detallado. Hac\u00e9 /start para rehacer el onboarding._"
-
-
-
-    basic += "\n\n_Para modificar tu perfil us\u00e1 /reset_"
-
-    await update.message.reply_text(basic, parse_mode="Markdown")
-
-
-
-async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-
-    telegram_id = update.effective_user.id
-
-
-    user = db.get_user(telegram_id)
-
-
-    if not user or not user.get("onboarding_complete"):
-
-
-        await update.message.reply_text("Primero configur???? tu perfil con /start.")
-
-
-        return
-
-
-    deleted = db.delete_last_meal(telegram_id)
-
-
-    if deleted:
-
-
-        await update.message.reply_text(f"?????????? Elimin???? tu ????ltima comida registrada: _{deleted}_", parse_mode="Markdown")
-
-
-    else:
-
-
-        await update.message.reply_text("No encontr???? comidas registradas para eliminar.")
-
-
-
-
-
+    history = history + [{"role": "assistant", "content": summary}]
+    context.user_data["history"] = history[-100:]
