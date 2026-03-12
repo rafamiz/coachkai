@@ -1,3 +1,4 @@
+import pytz
 import base64
 
 
@@ -2056,6 +2057,10 @@ async def process_message(
 
 
 
+        f"\nCurrent time (Argentina, UTC-3): {_time_str} on {_date_str}"
+
+
+
         f"\nCalories eaten: {total_cal} kcal"
 
 
@@ -2096,7 +2101,7 @@ async def process_message(
 
 
 
-    from datetime import date as _date
+    from datetime import date as _date, datetime as _datetime
 
 
 
@@ -2104,7 +2109,23 @@ async def process_message(
 
 
 
-    today_str = str(_date.today())
+    _ART = pytz.timezone("America/Argentina/Buenos_Aires")
+
+
+
+    _now_art = _datetime.now(_ART)
+
+
+
+    today_str = _now_art.strftime("%Y-%m-%d")
+
+
+
+    _time_str = _now_art.strftime("%H:%M")
+
+
+
+    _date_str = _now_art.strftime("%A %d/%m/%Y")
 
 
 
