@@ -2001,6 +2001,17 @@ async def process_message(
 
 
 
+    # Argentina timezone setup
+    from datetime import date as _date, datetime as _datetime
+    import pytz as _pytz
+    _ART = _pytz.timezone("America/Argentina/Buenos_Aires")
+    _now_art = _datetime.now(_ART)
+    today_str = _now_art.strftime("%Y-%m-%d")
+    _time_str = _now_art.strftime("%H:%M")
+    _date_str = _now_art.strftime("%A %d/%m/%Y")
+
+
+
     # Meals lines
 
 
@@ -2101,31 +2112,7 @@ async def process_message(
 
 
 
-    from datetime import date as _date, datetime as _datetime
-
-
-
     from collections import defaultdict
-
-
-
-    _ART = pytz.timezone("America/Argentina/Buenos_Aires")
-
-
-
-    _now_art = _datetime.now(_ART)
-
-
-
-    today_str = _now_art.strftime("%Y-%m-%d")
-
-
-
-    _time_str = _now_art.strftime("%H:%M")
-
-
-
-    _date_str = _now_art.strftime("%A %d/%m/%Y")
 
 
 
