@@ -437,20 +437,26 @@ async def send_meal_checkin(meal_type: str):
             except Exception:
                 pass
 
-        # Don't send if user messaged in the last 30 minutes
+        # Don't send if user already logged THIS meal type today
+        if meal_type in ("breakfast", "lunch", "dinner"):
+            meal_type_logged = [m for m in today_meals if m.get("meal_type") == meal_type]
+            if meal_type_logged:
+                continue  # already logged this meal type today, skip
+
+        # Don't send if user messaged in the last 60 minutes
         last_seen = db.get_last_seen(tid)
         if last_seen:
             try:
                 ls_dt = datetime.fromisoformat(str(last_seen).replace("Z", "+00:00"))
                 if ls_dt.tzinfo is None:
                     ls_dt = tz.localize(ls_dt)
-                if (now - ls_dt.astimezone(tz)).total_seconds() < 1800:
+                if (now - ls_dt.astimezone(tz)).total_seconds() < 3600:
                     continue  # user was active recently
             except Exception:
                 pass
 
         # Check daily limit - don't spam
-        followup_key = f"{meal_type}_checkin_{now.strftime('%Y%m%d')}"
+        followup_key = f"{meal_type}_checkin_{now.strftime('%Y-%m-%d')}"
         if db.already_sent_followup_today(uid, followup_key):
             continue
 

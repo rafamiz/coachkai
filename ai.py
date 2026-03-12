@@ -1082,7 +1082,9 @@ QUESTIONS: answer directly and briefly, using profile context when relevant.
 
 
 
-OFF-TOPIC: politely redirect to nutrition/food."""
+OFF-TOPIC: politely redirect to nutrition/food.
+
+CONTEXT ACCURACY: When the user asks about today's food, ONLY use data from [TODAY ...] section. The [PAST MEALS] section is historical reference only - never say the user ate something today if it's only in the past meals section."""
 
 
 
@@ -2065,7 +2067,7 @@ async def process_message(
 
 
 
-        f"\n\n[TODAY'S CONTEXT]"
+        f"\n\n[TODAY {today_str} - USE ONLY THIS FOR CURRENT DAY CONTEXT]"
 
 
 
@@ -2165,7 +2167,7 @@ async def process_message(
 
 
 
-        today_ctx += "\n\n[LAST 7 DAYS - meals]\n" + "\n".join(weekly_lines)
+        today_ctx += "\n\n[PAST MEALS (NOT TODAY - reference only, do NOT confuse with today {today_str})]\n" + "\n".join(weekly_lines)
 
 
 
