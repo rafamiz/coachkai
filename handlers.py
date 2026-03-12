@@ -76,7 +76,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-    await update.message.reply_text("ðŸŒ¿ *Bienvenido a Coach Kai*\n_Tu coach personal de nutriciÃ³n_", parse_mode="Markdown")
+    await update.message.reply_text("???????? *Bienvenido a Coach Kai*\n_Tu coach personal de nutrici????n_", parse_mode="Markdown")
 
 
     await update.message.chat.send_action("typing")
@@ -167,7 +167,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or not user.get("onboarding_complete"):
 
 
-        await update.message.reply_text("Primero necesito conocerte ðŸ˜Š UsÃ¡ /start.")
+        await update.message.reply_text("Primero necesito conocerte ???????? Us???? /start.")
 
 
         return
@@ -182,7 +182,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not meals:
 
 
-        await update.message.reply_text("TodavÃ­a no registraste ninguna comida hoy ðŸ½ï¸ Â¡Mandame una foto o describÃ­ lo que comÃ©s!")
+        await update.message.reply_text("Todav????a no registraste ninguna comida hoy ?????????????? ????Mandame una foto o describ???? lo que com????s!")
 
 
         return
@@ -212,7 +212,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     meal_type_names = {"breakfast": "Desayuno", "lunch": "Almuerzo", "dinner": "Cena", "snack": "Merienda"}
 
 
-    lines = [f"ðŸ“Š *{user['name']} â€” hoy*\n"]
+    lines = [f"????????? *{user['name']} ???????? hoy*\n"]
 
 
     for m in meals:
@@ -239,7 +239,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         desc = (m.get("description", "") or "")[:35]
 
 
-        lines.append(f"â€¢ {t} {tipo}: {desc} (~{cal} kcal)")
+        lines.append(f"??????? {t} {tipo}: {desc} (~{cal} kcal)")
 
 
 
@@ -251,25 +251,25 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filled = min(10, pct // 10)
 
 
-    bar = "â–ˆ" * filled + "â–‘" * (10 - filled)
+    bar = "???????" * filled + "????????" * (10 - filled)
 
 
-    lines.append(f"\nðŸ”¥ *{total_cal} / {daily_goal} kcal* [{bar}] {pct}%")
+    lines.append(f"\n????????? *{total_cal} / {daily_goal} kcal* [{bar}] {pct}%")
 
 
-    lines.append(f"ðŸ¥© ProteÃ­na acumulada: *{total_prot:.0f}g*")
+    lines.append(f"???????? Prote????na acumulada: *{total_prot:.0f}g*")
 
 
     if remaining > 0:
 
 
-        lines.append(f"ðŸ“‰ Te quedan ~{remaining} kcal para hoy")
+        lines.append(f"?????????? Te quedan ~{remaining} kcal para hoy")
 
 
     else:
 
 
-        lines.append("âœ… Â¡Ya alcanzaste tu meta calÃ³rica de hoy!")
+        lines.append("??????? ????Ya alcanzaste tu meta cal????rica de hoy!")
 
 
 
@@ -323,7 +323,7 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or not user.get("onboarding_complete"):
 
 
-        await update.message.reply_text("Primero necesito conocerte ðŸ˜Š UsÃ¡ /start.")
+        await update.message.reply_text("Primero necesito conocerte ???????? Us???? /start.")
 
 
         return
@@ -338,7 +338,7 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not meals:
 
 
-        await update.message.reply_text("TodavÃ­a no registraste ninguna comida hoy ðŸ½ï¸ Â¡Mandame una foto o describÃ­ quÃ© comiste!")
+        await update.message.reply_text("Todav????a no registraste ninguna comida hoy ?????????????? ????Mandame una foto o describ???? qu???? comiste!")
 
 
         return
@@ -347,7 +347,7 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-    await update.message.reply_text("Generando tu resumen del dÃ­a... ðŸ“Š")
+    await update.message.reply_text("Generando tu resumen del d????a... ?????????")
 
 
 
@@ -566,7 +566,7 @@ async def handle_intake_message(update: Update, context: ContextTypes.DEFAULT_TY
                 filename=f"plan_coachkai_{profile['name'].lower().replace(' ', '_')}.pdf",
 
 
-                caption="ðŸ“„ Tu plan de alimentaciÃ³n personalizado â€” Coach Kai"
+                caption="?????????? Tu plan de alimentaci????n personalizado ???????? Coach Kai"
 
 
             )
@@ -686,8 +686,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+    elif result["type"] == "delete_meal":
+        meal_ids = result.get("meal_ids", [])
+        deleted = 0
+        for mid in meal_ids:
+            if db.delete_meal_by_id(telegram_id, mid):
+                deleted += 1
+        reply = result.get("reply") or (
+            f"\U0001f5d1 Elimin?? {deleted} comida{'s' if deleted != 1 else ''}." if deleted
+            else "No encontr?? esa comida para eliminar."
+        )
+        history = history + [{"role": "assistant", "content": reply}]
+        context.user_data["history"] = history[-100:]
+        await update.message.reply_text(reply)
+
     elif result["type"] == "set_reminder":
-        from datetime import datetime, date
+        from datetime import datetime, timedelta
         import pytz
         time_str = result.get("time_str", "")
         message = result.get("message", "")
@@ -697,7 +711,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             h, m = map(int, time_str.split(":"))
             remind_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
             if remind_dt <= now:
-                from datetime import timedelta
                 remind_dt += timedelta(days=1)
             db.save_reminder(telegram_id, remind_dt.isoformat(), message)
             reply = result.get("reply") or f"\u23f0 Listo, te aviso a las {time_str}."
@@ -709,22 +722,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(reply)
 
     elif result["type"] == "save_memory":
-        db.save_memory(telegram_id, result["content"], result.get("category", "general"))
+        db.save_memory(telegram_id, result.get("content", ""), result.get("category", "general"))
         reply = result.get("reply") or "\U0001f9e0 Anotado, no lo olvido."
-        history = history + [{"role": "assistant", "content": reply}]
-        context.user_data["history"] = history[-100:]
-        await update.message.reply_text(reply)
-
-    elif result["type"] == "delete_meal":
-        meal_ids = result.get("meal_ids", [])
-        deleted = 0
-        for mid in meal_ids:
-            if db.delete_meal_by_id(telegram_id, mid):
-                deleted += 1
-        reply = result.get("reply") or (
-            f"\U0001f5d1 Eliminé {deleted} comida{'s' if deleted != 1 else ''}." if deleted
-            else "No encontré esa comida para eliminar."
-        )
         history = history + [{"role": "assistant", "content": reply}]
         context.user_data["history"] = history[-100:]
         await update.message.reply_text(reply)
@@ -753,7 +752,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.save_profile_text(telegram_id, upd["identity_markdown"])
 
 
-        reply = result.get("reply") or "âœ… ActualicÃ© tu perfil con la nueva info."
+        reply = result.get("reply") or "??????? Actualic???? tu perfil con la nueva info."
 
 
         history = history + [{"role": "assistant", "content": reply}]
@@ -801,7 +800,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or not user.get("onboarding_complete"):
 
 
-        await update.message.reply_text("Primero terminÃ¡ de contarme sobre vos ðŸ˜Š Â¡Ya casi!")
+        await update.message.reply_text("Primero termin???? de contarme sobre vos ???????? ????Ya casi!")
 
 
         return
@@ -810,7 +809,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-    await update.message.reply_text("Analizando tu foto... ðŸ”")
+    await update.message.reply_text("Analizando tu foto... ?????????")
 
 
 
@@ -969,7 +968,7 @@ async def _save_and_reply_meal(update: Update, user: dict, meal: dict, photo_pat
     # Try Open Food Facts to improve accuracy
 
 
-    source_note = "âš ï¸ _estimaciÃ³n Kai_"
+    source_note = "???????????? _estimaci????n Kai_"
 
 
     try:
@@ -999,7 +998,7 @@ async def _save_and_reply_meal(update: Update, user: dict, meal: dict, photo_pat
             detected   = off["food_name"]
 
 
-            source_note = "ðŸ“Š _Open Food Facts_"
+            source_note = "????????? _Open Food Facts_"
 
 
     except Exception:
@@ -1056,16 +1055,16 @@ async def _save_and_reply_meal(update: Update, user: dict, meal: dict, photo_pat
     # Format reply
 
 
-    aligned_icon = {"yes": "ðŸŽ¯", "partial": "ðŸ‘", "no": "âš ï¸"}.get(aligned, "ðŸ‘")
+    aligned_icon = {"yes": "????????", "partial": "?????????", "no": "????????????"}.get(aligned, "?????????")
 
 
     response = (
 
 
-        f"âœ… *{detected}* Â· ~{calories} kcal\n"
+        f"??????? *{detected}* ???? ~{calories} kcal\n"
 
 
-        f"ðŸ¥© {proteins_g:.0f}g proteÃ­na Â· ðŸŒ¾ {carbs_g:.0f}g carbos Â· ðŸ«’ {fats_g:.0f}g grasa\n"
+        f"???????? {proteins_g:.0f}g prote????na ???? ???????? {carbs_g:.0f}g carbos ???? ????????? {fats_g:.0f}g grasa\n"
 
 
         f"{source_note}"
@@ -1086,7 +1085,7 @@ async def _save_and_reply_meal(update: Update, user: dict, meal: dict, photo_pat
     cost = ai.get_turn_cost()
 
 
-    cost_line = f"\n\n_ðŸ’° ${cost:.5f} USD_"
+    cost_line = f"\n\n_????????? ${cost:.5f} USD_"
 
 
     try:
@@ -1098,7 +1097,7 @@ async def _save_and_reply_meal(update: Update, user: dict, meal: dict, photo_pat
     except Exception:
 
 
-        await update.message.reply_text(response.replace("*", "").replace("_", "") + f"\n\nðŸ’° ${cost:.5f} USD")
+        await update.message.reply_text(response.replace("*", "").replace("_", "") + f"\n\n????????? ${cost:.5f} USD")
 
 
 
@@ -1197,13 +1196,13 @@ async def _save_and_reply_workout(update: Update, user: dict, workout: dict):
 
 
 
-    intensity_icons = {"low": "ðŸš¶", "moderate": "ðŸƒ", "high": "ðŸ”¥", "very_high": "ðŸ’¥"}
+    intensity_icons = {"low": "????????", "moderate": "????????", "high": "?????????", "very_high": "?????????"}
 
 
-    icon = intensity_icons.get(intensity, "ðŸƒ")
+    icon = intensity_icons.get(intensity, "????????")
 
 
-    dist_str = f" Â· {distance_km:.1f} km" if distance_km else ""
+    dist_str = f" ???? {distance_km:.1f} km" if distance_km else ""
 
 
     response = (
@@ -1212,7 +1211,7 @@ async def _save_and_reply_workout(update: Update, user: dict, workout: dict):
         f"{icon} *{description}*\n"
 
 
-        f"â± {duration_min} min{dist_str} Â· ðŸ”¥ ~{calories_burned} kcal quemadas"
+        f"?????? {duration_min} min{dist_str} ???? ????????? ~{calories_burned} kcal quemadas"
 
 
     )
@@ -1221,7 +1220,7 @@ async def _save_and_reply_workout(update: Update, user: dict, workout: dict):
     if notes:
 
 
-        response += f"\nðŸ“ {notes}"
+        response += f"\n????????? {notes}"
 
 
 
@@ -1230,7 +1229,7 @@ async def _save_and_reply_workout(update: Update, user: dict, workout: dict):
     cost = ai.get_turn_cost()
 
 
-    cost_line = f"\n\n_ðŸ’° ${cost:.5f} USD_"
+    cost_line = f"\n\n_????????? ${cost:.5f} USD_"
 
 
     try:
@@ -1242,7 +1241,7 @@ async def _save_and_reply_workout(update: Update, user: dict, workout: dict):
     except Exception:
 
 
-        await update.message.reply_text(response.replace("*", "").replace("_", "") + f"\n\nðŸ’° ${cost:.5f} USD")
+        await update.message.reply_text(response.replace("*", "").replace("_", "") + f"\n\n????????? ${cost:.5f} USD")
 
 
 
@@ -1257,34 +1256,34 @@ async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
 
 
-        "ðŸ¥— *Coach Kai â€” Comandos disponibles*\n\n"
+        "????????? *Coach Kai ???????? Comandos disponibles*\n\n"
 
 
-        "ðŸ“ *Registrar comida:* mandÃ¡ lo que comiste en texto o foto\n"
+        "????????? *Registrar comida:* mand???? lo que comiste en texto o foto\n"
 
 
-        "   _Ej: 'comÃ­ 200g de pollo con ensalada'_\n\n"
+        "   _Ej: 'com???? 200g de pollo con ensalada'_\n\n"
 
 
-        "/plan â€” Ver tu plan de alimentaciÃ³n personalizado\n"
+        "/plan ???????? Ver tu plan de alimentaci????n personalizado\n"
 
 
-        "/stats â€” Ver estadÃ­sticas del dÃ­a\n"
+        "/stats ???????? Ver estad????sticas del d????a\n"
 
 
-        "/resumen â€” GrÃ¡fico nutricional del dÃ­a\n"
+        "/resumen ???????? Gr????fico nutricional del d????a\n"
 
 
-        "/perfil â€” Ver tu perfil actual\n"
+        "/perfil ???????? Ver tu perfil actual\n"
 
 
-        "/borrar â€” Eliminar la Ãºltima comida registrada\n"
+        "/borrar ???????? Eliminar la ????ltima comida registrada\n"
 
 
-        "/reset â€” Reiniciar tu perfil desde cero\n"
+        "/reset ???????? Reiniciar tu perfil desde cero\n"
 
 
-        "/ayuda â€” Mostrar este menÃº",
+        "/ayuda ???????? Mostrar este men????",
 
 
         parse_mode="Markdown"
@@ -1377,7 +1376,7 @@ async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or not user.get("onboarding_complete"):
 
 
-        await update.message.reply_text("Primero configurÃ¡ tu perfil con /start.")
+        await update.message.reply_text("Primero configur???? tu perfil con /start.")
 
 
         return
@@ -1389,13 +1388,13 @@ async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if deleted:
 
 
-        await update.message.reply_text(f"ðŸ—‘ EliminÃ© tu Ãºltima comida registrada: _{deleted}_", parse_mode="Markdown")
+        await update.message.reply_text(f"?????????? Elimin???? tu ????ltima comida registrada: _{deleted}_", parse_mode="Markdown")
 
 
     else:
 
 
-        await update.message.reply_text("No encontrÃ© comidas registradas para eliminar.")
+        await update.message.reply_text("No encontr???? comidas registradas para eliminar.")
 
 
 
