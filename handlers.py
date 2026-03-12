@@ -945,54 +945,57 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             now = datetime.now(_BA_TZ)
             ts = time_str_orig.lower().strip()
 
-            # Handle special words
-            if ts in ("mediodia", "mediodía", "12"):
+            # Normalize: remove common words
+            for word in ["las ", "la ", "kas ", "de la noche", "de la tarde", "de la mañana", "hs", "h"]:
+                ts = ts.replace(word, "")
+            ts = ts.strip()
+
+            # Special cases
+            if ts in ("mediodia", "mediodía"):
                 h, m = 12, 0
-            elif ts in ("medianoche", "0", "00"):
+            elif ts in ("medianoche",):
                 h, m = 0, 0
+            elif "y cuarto" in ts:
+                h = int(ts.replace("y cuarto", "").strip().split(":")[0])
+                m = 15
+            elif "y media" in ts:
+                h = int(ts.replace("y media", "").strip().split(":")[0])
+                m = 30
+            elif "menos cuarto" in ts:
+                h = int(ts.replace("menos cuarto", "").strip().split(":")[0])
+                m = 45
+                h = h - 1
+            elif ":" in ts:
+                parts = ts.split(":")
+                h, m = int(parts[0].strip()), int(parts[1].strip())
             else:
-                # Strip am/pm markers
-                is_pm = "pm" in ts or "noche" in ts or "tarde" in ts
-                is_am = "am" in ts or "mañana" in ts
-                ts = (ts.replace("am", "").replace("pm", "")
-                        .replace("de la noche", "").replace("de la tarde", "")
-                        .replace("de la mañana", "").replace("las ", "").replace("la ", "").strip())
+                h = int(float(ts.split()[0]))
+                m = 0
 
-                # Handle "X y cuarto", "X y media", "X menos cuarto"
-                if "menos cuarto" in ts:
-                    base = ts.replace("menos cuarto", "").strip()
-                    base_h = int(float(base.replace(":", ".")))
-                    h, m = base_h - 1, 45
-                elif "y cuarto" in ts:
-                    base = ts.replace("y cuarto", "").strip()
-                    h, m = int(float(base)), 15
-                elif "y media" in ts:
-                    base = ts.replace("y media", "").strip()
-                    h, m = int(float(base)), 30
-                elif ":" in ts:
-                    parts = ts.split(":")
-                    h, m = int(parts[0]), int(parts[1])
-                else:
-                    h, m = int(float(ts.split()[0])), 0
+            # PM inference: if h <= 8 and it's currently afternoon
+            orig_had_pm = any(w in time_str_orig.lower() for w in ["pm", "noche", "tarde"])
+            orig_had_am = any(w in time_str_orig.lower() for w in ["am", "mañana"])
+            if orig_had_pm and h < 12:
+                h += 12
+            elif not orig_had_am and not orig_had_pm and 1 <= h <= 8 and now.hour >= 12:
+                h += 12
 
-                # Apply PM context
-                if is_pm and h < 12:
-                    h += 12
-                elif not is_am and not is_pm and h < 12:
-                    # Infer: if current time is past noon and h is ambiguous, assume PM
-                    if now.hour >= 12 and h <= 8:
-                        h += 12
-
-            remind_dt = now.replace(hour=h % 24, minute=m, second=0, microsecond=0)
+            h = h % 24
+            remind_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
             if remind_dt <= now:
                 remind_dt += timedelta(days=1)
+
             import pytz as _pytz
             remind_dt_utc = remind_dt.astimezone(_pytz.utc)
             db.save_reminder(telegram_id, remind_dt_utc.isoformat(), message)
-            reply = result.get("reply") or f"⏰ Listo, te aviso a las {h % 24:02d}:{m:02d}."
+            reply = result.get("reply") or f"⏰ Listo, te aviso a las {h:02d}:{m:02d}."
         except Exception as e:
             logger.error(f"[handle_message] reminder parse error: {e}, time_str={time_str_orig!r}")
-            reply = "No entendí el horario. Decíme algo como 'avisame a las 9' o 'recordame a las 21:30'."
+            reply = "No pude entender el horario. Podés decirme 'avisame a las 21:30' o 'recordame a las 9'."
+        history = history + [{"role": "assistant", "content": reply}]
+        context.user_data["history"] = history[-20:]
+        await update.message.reply_text(reply)
+        return
 
 
 
