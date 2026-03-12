@@ -749,11 +749,11 @@ def save_reminder(telegram_id: int, remind_at_iso: str, message: str) -> int:
 
 
 def get_pending_reminders() -> list:
-    """Get all unsent reminders that are due (remind_at <= now)."""
+    """Get all unsent reminders that are due (remind_at <= now in UTC)."""
     conn = get_conn()
     c = _cur(conn)
     if _USE_POSTGRES:
-        c.execute("SELECT * FROM reminders WHERE sent = FALSE AND remind_at <= NOW() ORDER BY remind_at")
+        c.execute("SELECT * FROM reminders WHERE sent = FALSE AND remind_at AT TIME ZONE 'UTC' <= NOW() AT TIME ZONE 'UTC' ORDER BY remind_at")
     else:
         c.execute("SELECT * FROM reminders WHERE sent = 0 AND remind_at <= datetime('now') ORDER BY remind_at")
     rows = c.fetchall()
