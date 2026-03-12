@@ -33,6 +33,12 @@ def start_scheduler(app):
     _scheduler.add_job(send_daily_summaries,     "cron",     hour=21, minute=0, id="daily_summary")
     _scheduler.add_job(check_reminders,          "interval", minutes=1,  id="reminders_check")
     _scheduler.add_job(check_meal_absence,       "interval", minutes=30, id="absence_check")
+    # Proactive meal check-ins (Argentina time via ART timezone scheduler)
+    _scheduler.add_job(send_meal_checkin, "cron", hour=8,  minute=30, args=["breakfast"], id="breakfast_checkin")
+    _scheduler.add_job(send_meal_checkin, "cron", hour=13, minute=0,  args=["lunch"],     id="lunch_checkin")
+    _scheduler.add_job(send_meal_checkin, "cron", hour=20, minute=30, args=["dinner"],    id="dinner_checkin")
+    # Inactivity check every hour
+    _scheduler.add_job(send_inactivity_checkin, "interval", hours=1, id="inactivity_check")
     _scheduler.start()
     logger.info("Scheduler started")
 
@@ -397,3 +403,109 @@ async def _send_summary_to_user(user: dict, meals: list):
         message = await ai.generate_daily_summary(user, meals)
         if message:
             await _bot_app.bot.send_message(chat_id=telegram_id, text=message)
+
+# ---------------------------------------------------------------------------
+# Proactive meal check-in jobs
+# ---------------------------------------------------------------------------
+
+async def send_meal_checkin(meal_type: str):
+    """Send proactive meal check-in to all active users."""
+    if _bot_app is None:
+        return
+    import pytz
+    from datetime import datetime
+    tz = pytz.timezone("America/Argentina/Buenos_Aires")
+    now = datetime.now(tz)
+
+    users = db.get_all_users()
+    for user in users:
+        if not user.get("onboarding_complete"):
+            continue
+        tid = user["telegram_id"]
+        uid = user.get("id", 0)
+
+        # Don't send if user already logged a meal in the last 2 hours
+        today_meals = db.get_today_meals(tid)
+        if today_meals:
+            last_meal_time_str = today_meals[-1].get("eaten_at") or ""
+            try:
+                last_meal_dt = datetime.fromisoformat(last_meal_time_str.replace("Z", "+00:00"))
+                if last_meal_dt.tzinfo is None:
+                    last_meal_dt = tz.localize(last_meal_dt)
+                if (now - last_meal_dt.astimezone(tz)).total_seconds() < 7200:
+                    continue  # ate recently, skip
+            except Exception:
+                pass
+
+        # Don't send if user messaged in the last 30 minutes
+        last_seen = db.get_last_seen(tid)
+        if last_seen:
+            try:
+                ls_dt = datetime.fromisoformat(str(last_seen).replace("Z", "+00:00"))
+                if ls_dt.tzinfo is None:
+                    ls_dt = tz.localize(ls_dt)
+                if (now - ls_dt.astimezone(tz)).total_seconds() < 1800:
+                    continue  # user was active recently
+            except Exception:
+                pass
+
+        # Check daily limit - don't spam
+        followup_key = f"{meal_type}_checkin_{now.strftime('%Y%m%d')}"
+        if db.already_sent_followup_today(uid, followup_key):
+            continue
+
+        try:
+            memories = db.get_memories(tid, limit=10)
+            msg = await ai.generate_checkin_message(user, meal_type, memories)
+            await _bot_app.bot.send_message(chat_id=tid, text=msg)
+            db.add_followup(uid, followup_key, followup_key)
+            logger.info(f"[scheduler] Sent {meal_type} checkin to {tid}")
+        except Exception as e:
+            logger.error(f"[scheduler] {meal_type} checkin error for {tid}: {e}")
+
+
+async def send_inactivity_checkin():
+    """Check for users inactive 3+ hours during daytime and send a check-in."""
+    if _bot_app is None:
+        return
+    import pytz
+    from datetime import datetime
+    tz = pytz.timezone("America/Argentina/Buenos_Aires")
+    now = datetime.now(tz)
+
+    # Only between 10:00 and 22:00
+    if not (10 <= now.hour < 22):
+        return
+
+    users = db.get_all_users()
+    for user in users:
+        if not user.get("onboarding_complete"):
+            continue
+        tid = user["telegram_id"]
+        uid = user.get("id", 0)
+
+        last_seen = db.get_last_seen(tid)
+        if last_seen is None:
+            continue
+
+        try:
+            ls_dt = datetime.fromisoformat(str(last_seen).replace("Z", "+00:00"))
+            if ls_dt.tzinfo is None:
+                ls_dt = tz.localize(ls_dt)
+            hours_inactive = (now - ls_dt.astimezone(tz)).total_seconds() / 3600
+
+            if hours_inactive < 3:
+                continue
+
+            # Max 1 inactivity message per 4-hour window
+            followup_key = f"inactivity_{now.strftime('%Y%m%d')}_{now.hour // 4}"
+            if db.already_sent_followup_today(uid, followup_key):
+                continue
+
+            memories = db.get_memories(tid, limit=10)
+            msg = await ai.generate_checkin_message(user, "inactivity", memories)
+            await _bot_app.bot.send_message(chat_id=tid, text=msg)
+            db.add_followup(uid, followup_key, followup_key)
+            logger.info(f"[scheduler] Sent inactivity checkin to {tid} ({hours_inactive:.1f}h inactive)")
+        except Exception as e:
+            logger.error(f"[scheduler] inactivity checkin error for {tid}: {e}")

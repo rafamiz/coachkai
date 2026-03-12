@@ -93,7 +93,8 @@ def init_db():
                 created_at TIMESTAMP DEFAULT NOW(),
                 onboarding_complete INTEGER DEFAULT 0,
                 profile_text TEXT,
-                onboarding_history TEXT
+                onboarding_history TEXT,
+                last_seen TEXT
             )
         """)
 
@@ -130,6 +131,12 @@ def init_db():
                 conn.commit()
             except Exception:
                 conn.rollback()
+
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP")
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
@@ -265,6 +272,11 @@ def init_db():
                 c.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
             except Exception:
                 pass
+
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN last_seen TEXT")
+        except Exception:
+            pass
 
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
@@ -854,4 +866,29 @@ def get_last_meal_time(telegram_id: int):
     _release(conn)
     if row:
         return dict(row).get("eaten_at")
+    return None
+
+# ── Last seen tracking ────────────────────────────────────────────────────────
+
+def update_last_seen(telegram_id: int):
+    """Update the last_seen timestamp for a user."""
+    conn = get_conn()
+    c = _cur(conn)
+    if _USE_POSTGRES:
+        c.execute("UPDATE users SET last_seen = NOW() WHERE telegram_id = %s", (telegram_id,))
+    else:
+        c.execute("UPDATE users SET last_seen = datetime('now') WHERE telegram_id = ?", (telegram_id,))
+    conn.commit()
+    _release(conn)
+
+
+def get_last_seen(telegram_id: int):
+    """Get last_seen timestamp for a user."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT last_seen FROM users WHERE telegram_id = ?"), (telegram_id,))
+    row = c.fetchone()
+    _release(conn)
+    if row:
+        return dict(row).get("last_seen")
     return None

@@ -772,6 +772,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+    db.update_last_seen(telegram_id)
+
     # Maintain conversation history (keep last 100 messages)
 
     history = context.user_data.get("history", [])

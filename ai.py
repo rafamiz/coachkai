@@ -2863,5 +2863,76 @@ async def generate_daily_summary(user: dict, meals: list) -> str:
 
     return await _ask([{"role": "user", "content": prompt}])
 
+# ---------------------------------------------------------------------------
+# Proactive check-in message generator (simple version for meal/inactivity triggers)
+# ---------------------------------------------------------------------------
+
+def get_today_meals_summary(telegram_id: int) -> str:
+    """Get a brief summary of today's meals for context."""
+    try:
+        import db as _db
+        meals = _db.get_today_meals(telegram_id)
+        if not meals:
+            return "No meals logged yet today."
+        total = sum(m.get("calories_est", 0) or 0 for m in meals)
+        meal_list = ", ".join(m.get("description", "?")[:20] for m in meals[:4])
+        return f"Meals today: {meal_list}. Total: {total} kcal."
+    except Exception:
+        return "No data."
 
 
+async def generate_checkin_message(user: dict, trigger: str, memories: list = None) -> str:
+    """Generate a proactive check-in message for the user.
+
+    trigger: 'breakfast', 'lunch', 'dinner', 'inactivity', 'evening_summary'
+    """
+    import pytz
+    from datetime import datetime
+    ART = pytz.timezone("America/Argentina/Buenos_Aires")
+    now = datetime.now(ART)
+    time_str = now.strftime("%H:%M")
+
+    trigger_prompts = {
+        "breakfast": (
+            f"It's {time_str} in Argentina. Send a warm, short breakfast check-in. "
+            "Ask what they're having or suggest something based on their profile."
+        ),
+        "lunch": (
+            f"It's {time_str} in Argentina. Send a friendly lunch check-in. "
+            "Ask what they ate or are planning to eat."
+        ),
+        "dinner": (
+            f"It's {time_str} in Argentina. Send a dinner check-in. "
+            "Ask about their day and what they're planning to eat tonight."
+        ),
+        "inactivity": (
+            f"It's {time_str} in Argentina. The user hasn't messaged in 3+ hours. "
+            "Send a casual check-in \u2014 ask how they're doing, if they ate, "
+            "if they went to the gym, or what they have planned."
+        ),
+        "evening_summary": (
+            f"It's {time_str} in Argentina. Send a brief encouraging evening summary prompt "
+            "\u2014 ask how their nutrition day went overall."
+        ),
+    }
+
+    prompt = trigger_prompts.get(trigger, trigger_prompts["inactivity"])
+
+    profile_ctx = _build_profile_context(user, memories)
+    today_meals_summary = get_today_meals_summary(user.get("telegram_id", 0))
+
+    system = (
+        SYSTEM_BASE + profile_ctx
+        + f"\n\n[TODAY SO FAR]\n{today_meals_summary}"
+        + "\n\nYou are initiating a conversation proactively. Keep it to 1-2 lines max. Natural, warm, not pushy."
+    )
+
+    client = get_client()
+    import anthropic
+    resp = await client.messages.create(
+        model=MODEL,
+        max_tokens=150,
+        system=system,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return resp.content[0].text.strip()
