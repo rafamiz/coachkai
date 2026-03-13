@@ -36,6 +36,7 @@ def start_scheduler(app):
     # Proactive meal check-ins (Argentina time via ART timezone scheduler)
     _scheduler.add_job(send_meal_checkin, "cron", hour=8,  minute=30, args=["breakfast"], id="breakfast_checkin")
     _scheduler.add_job(send_meal_checkin, "cron", hour=13, minute=0,  args=["lunch"],     id="lunch_checkin")
+    _scheduler.add_job(send_meal_checkin, "cron", hour=17, minute=0,  args=["snack"],     id="snack_checkin")
     _scheduler.add_job(send_meal_checkin, "cron", hour=20, minute=30, args=["dinner"],    id="dinner_checkin")
     # Inactivity check every hour
     _scheduler.add_job(send_inactivity_checkin, "interval", hours=1, id="inactivity_check")
