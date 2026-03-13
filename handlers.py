@@ -771,22 +771,38 @@ async def _handle_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(reply.replace("*", "").replace("_", ""))
         return
 
+    logger.info(f"[intake] turn for {telegram_id}, history_len={len(history)}")
     result = await ai.intake_turn(history, text)
+    # Force completion if conversation is too long
+    if not result.get("done") and len(history) >= 12:
+        logger.warning(f"[intake] Max turns reached for {telegram_id}, forcing profile extraction")
+        forced = await ai.force_extract_profile(history + [{"role": "user", "content": text}])
+        if forced:
+            result = {"done": True, "profile": forced, "reply": forced.get("reply")}
+    logger.info(f"[intake] result done={result.get('done')}, profile_name={result.get('profile', {}).get('name')}")
 
     if result.get("done"):
         profile = result.get("profile", {})
-        db.upsert_user(
-            telegram_id,
-            onboarding_complete=1,
-            name=profile.get("name"),
-            age=profile.get("age"),
-            weight_kg=profile.get("weight_kg"),
-            height_cm=profile.get("height_cm"),
-            goal=profile.get("goal"),
-            activity_level=profile.get("activity_level"),
-        )
-        if profile.get("identity_markdown"):
-            db.save_profile_text(telegram_id, profile["identity_markdown"])
+        try:
+            db.upsert_user(
+                telegram_id,
+                onboarding_complete=1,
+                name=profile.get("name"),
+                age=profile.get("age"),
+                weight_kg=profile.get("weight_kg"),
+                height_cm=profile.get("height_cm"),
+                goal=profile.get("goal"),
+                activity_level=profile.get("activity_level"),
+            )
+            logger.info(f"[intake] Profile saved for {telegram_id}: onboarding_complete=1")
+            if profile.get("identity_markdown"):
+                db.save_profile_text(telegram_id, profile["identity_markdown"])
+        except Exception as e:
+            logger.error(f"[intake] FAILED to save profile for {telegram_id}: {e}", exc_info=True)
+            await update.message.reply_text(
+                "Hubo un error guardando tu perfil. Intentá /start de nuevo."
+            )
+            return
 
         reply = result.get("reply")
         if not reply:
