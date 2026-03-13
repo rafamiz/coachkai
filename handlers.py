@@ -904,7 +904,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ai.reset_turn_cost()
 
-    result = await ai.process_message(text, user, history[:-1])
+    # Enrich context with nutritional data if message mentions eating
+    food_context = ""
+    eating_keywords = ["com\u00ed", "tom\u00e9", "almorc\u00e9", "cen\u00e9", "desayun\u00e9", "me com\u00ed", "me tom\u00e9"]
+    if any(kw in text.lower() for kw in eating_keywords):
+        try:
+            import re
+            from nutrition_lookup import search_food
+            food_match = re.search(
+                r'(?:com\u00ed|tom\u00e9|almorc\u00e9|cen\u00e9|desayun\u00e9)\s+(.+)',
+                text.lower()
+            )
+            if food_match:
+                food_query = food_match.group(1).strip()[:50]
+                food_data = await search_food(food_query)
+                if food_data:
+                    brand_str = f" ({food_data['brand']})" if food_data.get("brand") else ""
+                    food_context = (
+                        f"\n[DATOS NUTRICIONALES de Open Food Facts para '{food_data['name']}'"
+                        f"{brand_str}]: "
+                        f"{food_data['calories_per_100g']:.0f}kcal/100g, "
+                        f"{food_data['proteins_per_100g']:.1f}g prot, "
+                        f"{food_data['carbs_per_100g']:.1f}g carbos, "
+                        f"{food_data['fats_per_100g']:.1f}g grasa por 100g."
+                    )
+                    logger.info(f"[nutrition] OFF found: {food_data['name']}")
+        except Exception as e:
+            logger.warning(f"[nutrition] lookup error: {e}")
+
+    result = await ai.process_message(text + food_context, user, history[:-1])
 
 
 
