@@ -54,7 +54,9 @@ def _q(sql: str) -> str:
 
 def _today_clause(col: str):
     """Return (sql_fragment, value) for filtering a timestamp column to today."""
-    today = datetime.now().strftime("%Y-%m-%d")
+    import pytz as _tz
+    _BA = _tz.timezone("America/Argentina/Buenos_Aires")
+    today = datetime.now(_BA).strftime("%Y-%m-%d")
     if _USE_POSTGRES:
         return f"DATE({col}) = ?", today
     return f"{col} LIKE ?", f"{today}%"
@@ -470,11 +472,14 @@ def add_meal(user_id: int, telegram_id: int, description: str, photo_path: str,
              proteins_g: float = 0, carbs_g: float = 0, fats_g: float = 0):
     conn = get_conn()
     c = _cur(conn)
+    import pytz as _tz
+    _BA = _tz.timezone("America/Argentina/Buenos_Aires")
+    eaten_at = datetime.now(_BA).strftime("%Y-%m-%d %H:%M:%S")
     c.execute(_q("""
-        INSERT INTO meals (user_id, telegram_id, description, photo_path, calories_est, meal_type, claude_analysis, proteins_g, carbs_g, fats_g)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO meals (user_id, telegram_id, description, photo_path, calories_est, meal_type, claude_analysis, proteins_g, carbs_g, fats_g, eaten_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """), (user_id, telegram_id, description, photo_path, calories_est, meal_type, claude_analysis,
-           proteins_g or 0, carbs_g or 0, fats_g or 0))
+           proteins_g or 0, carbs_g or 0, fats_g or 0, eaten_at))
     conn.commit()
     _release(conn)
 
