@@ -438,10 +438,9 @@ async def send_meal_checkin(meal_type: str):
                 pass
 
         # Don't send if user already logged THIS meal type today
-        if meal_type in ("breakfast", "lunch", "dinner"):
-            today_meals = db.get_today_meals(tid)
-            if any(m.get("meal_type") == meal_type for m in today_meals):
-                continue  # already logged this meal type today, skip
+        today_meals = db.get_today_meals(tid)
+        if any(m.get("meal_type") == meal_type for m in today_meals):
+            continue  # already logged this meal type today, skip
 
         # Check daily limit - don't spam
         followup_key = f"{meal_type}_checkin_{now.strftime('%Y-%m-%d')}"
