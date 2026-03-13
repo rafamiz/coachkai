@@ -237,26 +237,25 @@ async def _save_and_reply_meal(update: Update, user: dict, result: dict):
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     telegram_id = update.effective_user.id
-
     db.upsert_user(telegram_id, onboarding_complete=0)
-
     context.user_data.clear()
+    context.user_data["intake_history"] = []
 
-    url = _onboarding_url(telegram_id)
-
-    await update.message.reply_text(
-
-        "\U0001f33f *Bienvenido a Coach Kai*\n_Tu coach personal de nutrici\u00f3n_\n\n"
-
-        "Para empezar, complet\u00e1 tu perfil \u2014 solo tarda un minuto:\n\n"
-
-        f"{url}",
-
-        parse_mode="Markdown",
-
+    # Start conversational intake
+    ai.reset_turn_cost()
+    result = await ai.intake_turn([], "hola, quiero empezar con el bot")
+    reply = result.get("reply") or (
+        "\u00a1Hola! Soy Coach Kai, tu coach personal de nutrici\u00f3n \U0001f957\n"
+        "\u00bfC\u00f3mo te llam\u00e1s?"
     )
+
+    context.user_data["intake_history"] = [
+        {"role": "user", "content": "hola, quiero empezar con el bot"},
+        {"role": "assistant", "content": reply},
+    ]
+
+    await update.message.reply_text(reply)
 
 
 
@@ -409,38 +408,34 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     telegram_id = update.effective_user.id
-
     db.upsert_user(
-
         telegram_id,
-
         onboarding_complete=0,
-
         name=None,
-
         age=None,
-
         weight_kg=None,
-
         height_cm=None,
-
         goal=None,
-
         activity_level=None,
-
     )
-
     context.user_data.clear()
+    context.user_data["intake_history"] = []
 
-    url = _onboarding_url(telegram_id)
-
-    await update.message.reply_text(
-
-        f"Perfecto, empezamos de cero \U0001f504\n\nComplet\u00e1 tu nuevo perfil ac\u00e1:\n\n{url}"
-
+    # Start conversational intake
+    ai.reset_turn_cost()
+    result = await ai.intake_turn([], "hola, quiero empezar de nuevo con el bot")
+    reply = result.get("reply") or (
+        "Perfecto, empezamos de cero \U0001f504\n"
+        "Cont\u00e1me, \u00bfc\u00f3mo te llam\u00e1s?"
     )
+
+    context.user_data["intake_history"] = [
+        {"role": "user", "content": "hola, quiero empezar de nuevo con el bot"},
+        {"role": "assistant", "content": reply},
+    ]
+
+    await update.message.reply_text(reply)
 
 
 
@@ -736,6 +731,65 @@ async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# Intake handler (conversational onboarding)
+# ---------------------------------------------------------------------------
+
+async def _handle_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle a message during the onboarding intake flow."""
+    telegram_id = update.effective_user.id
+    text = update.message.text.strip()
+
+    history = context.user_data.get("intake_history", [])
+
+    await update.message.chat.send_action("typing")
+    ai.reset_turn_cost()
+    result = await ai.intake_turn(history, text)
+
+    # Update stored history
+    updated_history = history + [
+        {"role": "user", "content": text},
+        {"role": "assistant", "content": result.get("reply") or ""},
+    ]
+    context.user_data["intake_history"] = updated_history[-40:]
+
+    if result.get("done"):
+        profile = result.get("profile", {})
+        db.upsert_user(
+            telegram_id,
+            onboarding_complete=1,
+            name=profile.get("name"),
+            age=profile.get("age"),
+            weight_kg=profile.get("weight_kg"),
+            height_cm=profile.get("height_cm"),
+            goal=profile.get("goal"),
+            activity_level=profile.get("activity_level"),
+        )
+        if profile.get("identity_markdown"):
+            db.save_profile_text(telegram_id, profile["identity_markdown"])
+
+        reply = result.get("reply")
+        if not reply:
+            reply = (
+                "\u2705 \u00a1Perfecto! Ya ten\u00e9s tu perfil listo. "
+                "Ahora pod\u00e9s registrar tus comidas mand\u00e1ndome lo que com\u00eds. "
+                "\u00a1Empecemos! \U0001f957"
+            )
+        try:
+            await update.message.reply_text(reply, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(reply.replace("*", "").replace("_", ""))
+        # Clear intake history now that onboarding is done
+        context.user_data.pop("intake_history", None)
+    else:
+        reply = result.get("reply") or "Cont\u00e1me un poco m\u00e1s."
+        try:
+            await update.message.reply_text(reply, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(reply.replace("*", "").replace("_", ""))
+
 # ---------------------------------------------------------------------------
 
 # Main message handler
@@ -759,15 +813,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     user = db.get_user(telegram_id)
-
     if not user or not user.get("onboarding_complete"):
-
-        await update.message.reply_text(
-
-            "Hola \U0001f44b Us\u00e1 /start para configurar tu perfil."
-
-        )
-
+        await _handle_intake(update, context)
         return
 
 
