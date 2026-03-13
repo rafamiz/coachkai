@@ -818,6 +818,35 @@ async def _handle_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(reply, parse_mode="Markdown")
         except Exception:
             await update.message.reply_text(reply.replace("*", "").replace("_", ""))
+
+        # Generate and send PDF plan automatically after onboarding
+        try:
+            await update.message.chat.send_action("upload_document")
+            user = db.get_user(telegram_id)
+            plan = await ai.generate_meal_plan(user)
+            summary = plan.get("summary", "") if isinstance(plan, dict) else str(plan)
+            plan_text = plan.get("plan_text", summary) if isinstance(plan, dict) else summary
+
+            import pdf_generator
+            from io import BytesIO
+            pdf_bytes = pdf_generator.generate_plan_pdf(user, plan_text)
+            pdf_buf = BytesIO(pdf_bytes)
+            pdf_buf.name = "plan_coachkai.pdf"
+
+            await update.message.reply_text(
+                "\U0001f4cb Ac\u00e1 te mando tu plan de alimentaci\u00f3n personalizado:"
+            )
+            await update.message.reply_document(
+                document=pdf_buf,
+                filename="plan_coachkai.pdf",
+                caption="\U0001f957 *Tu plan Coach Kai*",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"[intake] PDF generation failed: {e}", exc_info=True)
+            await update.message.reply_text(
+                "Cuando quer\u00e1s tu plan de comidas, us\u00e1 /plan \U0001f4cb"
+            )
     else:
         reply = result.get("reply") or "Cont\u00e1me un poco m\u00e1s."
         updated_history = (history + [
