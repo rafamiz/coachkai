@@ -412,6 +412,9 @@ def _build_profile_context(user: dict, memories: list = None) -> str:
 
 
         ctx += f"\n\n[USER IDENTITY]\n{user['profile_text']}"
+    if user.get("training_schedule"):
+        ctx += "\n[TRAINING SCHEDULE] " + user['training_schedule']
+
 
 
 
@@ -1437,7 +1440,11 @@ UPDATE_IDENTITY_TOOL = {
 
 
 
-            "activity_level": {"type": "string",  "enum": ["sedentary", "lightly_active", "active", "very_active"]}
+            "activity_level": {"type": "string",  "enum": ["sedentary", "lightly_active", "active", "very_active"]},
+            "training_schedule": {
+                "type": "string",
+                "description": "User's training/workout schedule (e.g. 'gym Tue/Thu/Sat 9am, padel Sundays')"
+            }
 
 
 

@@ -152,6 +152,12 @@ def init_db():
         except Exception:
             conn.rollback()
 
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS training_schedule TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
                 id SERIAL PRIMARY KEY,
@@ -255,7 +261,8 @@ def init_db():
                 profile_text TEXT,
                 onboarding_history TEXT,
                 intake_history TEXT,
-                chat_history TEXT
+                chat_history TEXT,
+                training_schedule TEXT
             )
         """)
 
@@ -301,6 +308,11 @@ def init_db():
 
         try:
             c.execute("ALTER TABLE users ADD COLUMN chat_history TEXT")
+        except Exception:
+            pass
+
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN training_schedule TEXT")
         except Exception:
             pass
 
