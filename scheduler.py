@@ -432,8 +432,8 @@ async def send_meal_checkin(meal_type: str):
                 ls_dt = datetime.fromisoformat(str(last_seen).replace("Z", "+00:00"))
                 if ls_dt.tzinfo is None:
                     ls_dt = tz.localize(ls_dt)
-                if (now - ls_dt.astimezone(tz)).total_seconds() < 3600:
-                    continue  # user was active recently
+                if (now - ls_dt.astimezone(tz)).total_seconds() < 900:
+                    continue  # user was active in last 15 min, skip checkin
             except Exception:
                 pass
 
