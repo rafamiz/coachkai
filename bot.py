@@ -46,7 +46,7 @@ async def _error_handler(update, context):
 def main():
     db.init_db()
 
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TELEGRAM_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN not set in .env")
 
