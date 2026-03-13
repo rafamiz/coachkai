@@ -38,6 +38,7 @@ def start_scheduler(app):
     _scheduler.add_job(send_meal_checkin, "cron", hour=13, minute=0,  args=["lunch"],     id="lunch_checkin")
     _scheduler.add_job(send_meal_checkin, "cron", hour=17, minute=0,  args=["snack"],     id="snack_checkin")
     _scheduler.add_job(send_meal_checkin, "cron", hour=20, minute=30, args=["dinner"],    id="dinner_checkin")
+    _scheduler.add_job(check_training_reminders, "interval", minutes=5, id="training_reminders")
     # Inactivity check every hour
     _scheduler.add_job(send_inactivity_checkin, "interval", hours=1, id="inactivity_check")
     _scheduler.start()
@@ -158,6 +159,51 @@ def seed_default_schedules(user_id: int):
 
 def _minutes(hour: float, minute: float) -> int:
     return int(hour) * 60 + int(minute)
+
+
+def _parse_training_schedule(training_schedule: str):
+    """
+    Parse training schedule text into list of dicts with weekday/hour/minute.
+    weekday: 0=Monday, 1=Tuesday, ..., 6=Sunday
+    Returns list of dicts: [{"weekday": int, "hour": int, "minute": int}]
+    """
+    if not training_schedule:
+        return []
+
+    day_map = {
+        "lunes": 0, "lu": 0, "monday": 0,
+        "martes": 1, "ma": 1, "tuesday": 1,
+        "mi\u00e9rcoles": 2, "mie": 2, "miercoles": 2, "wednesday": 2,
+        "jueves": 3, "ju": 3, "thursday": 3,
+        "viernes": 4, "vi": 4, "friday": 4,
+        "s\u00e1bado": 5, "sabado": 5, "sa": 5, "saturday": 5,
+        "domingo": 6, "do": 6, "sunday": 6,
+    }
+
+    import re
+    text = training_schedule.lower()
+
+    # Find time: HH:MM or "9am" or "9 hs" or "9h" or "9 de la ma\u00f1ana"
+    time_match = re.search(
+        r'(\d{1,2}):(\d{2})(?:am|pm)?|(\d{1,2})\s*(?:am|hs|h\b|de la ma\u00f1ana)',
+        text
+    )
+    hour, minute = 9, 0  # default
+    if time_match:
+        if time_match.group(1):
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2))
+        elif time_match.group(3):
+            hour = int(time_match.group(3))
+            minute = 0
+
+    # Find days
+    found_days = []
+    for day_name, day_num in day_map.items():
+        if day_name in text and day_num not in found_days:
+            found_days.append(day_num)
+
+    return [{"weekday": d, "hour": hour, "minute": minute} for d in sorted(found_days)]
 
 
 def _near(current_min: int, target_min: int, window: int = 4) -> bool:
@@ -359,6 +405,60 @@ async def check_meal_absence():
                     db.add_followup(uid, f"absence_nudge_{now.hour}", "absence_nudge")
         except Exception as e:
             logger.error(f"[scheduler] absence check error for {tid}: {e}")
+
+
+async def check_training_reminders():
+    """Send pre-workout nutrition tip 30 min before scheduled training."""
+    if _bot_app is None:
+        return
+    import pytz
+    from datetime import datetime
+    tz = pytz.timezone("America/Argentina/Buenos_Aires")
+    now = datetime.now(tz)
+    today_weekday = now.weekday()  # 0=Monday
+    cur_min = now.hour * 60 + now.minute
+
+    users = db.get_all_users()
+    for user in users:
+        if not user.get("onboarding_complete"):
+            continue
+        training_schedule = user.get("training_schedule")
+        if not training_schedule:
+            continue
+        tid = user["telegram_id"]
+        uid = user.get("id", 0)
+
+        parsed = _parse_training_schedule(training_schedule)
+        for slot in parsed:
+            if slot["weekday"] != today_weekday:
+                continue
+
+            # Send reminder 30 min before training
+            training_min = slot["hour"] * 60 + slot["minute"]
+            reminder_min = training_min - 30
+            if reminder_min < 0:
+                reminder_min += 1440
+
+            if not _near(cur_min, reminder_min, window=3):
+                continue
+
+            # Check dedup
+            fkey = f"preworkout_{now.strftime('%Y-%m-%d')}_{slot['weekday']}_{slot['hour']}"
+            if db.already_sent_followup_today(uid, fkey):
+                continue
+
+            db.add_followup(uid, fkey, fkey)
+
+            try:
+                goal = user.get("goal", "maintain")
+                tip = await ai._ask([{"role": "user", "content":
+                    f"Dales a {user.get('name', 'vos')} un tip nutricional corto (2 l\u00edneas m\u00e1x) para antes de entrenar. "
+                    f"Su objetivo es {goal}. Algo concreto: qu\u00e9 comer antes del gym. "
+                    f"Tono: semiformal argentino, directo. Empez\u00e1 con '\u23f0 En 30 min ten\u00e9s el gym.'"}])
+                await _bot_app.bot.send_message(chat_id=tid, text=tip)
+                logger.info(f"[scheduler] Sent pre-workout reminder to {tid}")
+            except Exception as e:
+                logger.error(f"[scheduler] Pre-workout reminder error for {tid}: {e}")
 
 
 async def send_daily_summaries():
