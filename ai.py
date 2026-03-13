@@ -985,7 +985,8 @@ CUANDO REGISTRAR COMIDAS (tiempo verbal):
 
 CONOCIMIENTO DE ALIMENTOS ARGENTINOS:
 - Medialunas: facturas de manteca o grasa, ~120kcal c/u.
-- Alfajor Milka/Havanna: ~250-300kcal c/u.
+- Cachafaz: marca premium argentina de alfajores (NO es un s\u00e1ndwich). Alfajor de maicena Cachafaz ~180kcal, alfajor de chocolate Cachafaz ~230kcal. Son grandes y con mucho dulce de leche.
+- Alfajor Milka/Havanna/Cachafaz: ~200-300kcal c/u seg\u00fan tama\u00f1o y tipo.
 - Empanada (carne, pollo, verdura): ~200-250kcal c/u.
 - Milanesa (carne, mediana): ~350kcal. Milanesa napolitana: ~450kcal.
 - Asado (200g costilla): ~400kcal. Churrasco 200g: ~320kcal.
