@@ -138,6 +138,12 @@ def init_db():
         except Exception:
             conn.rollback()
 
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS intake_history TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
                 id SERIAL PRIMARY KEY,
@@ -239,7 +245,8 @@ def init_db():
                 created_at TEXT DEFAULT (datetime('now')),
                 onboarding_complete INTEGER DEFAULT 0,
                 profile_text TEXT,
-                onboarding_history TEXT
+                onboarding_history TEXT,
+                intake_history TEXT
             )
         """)
 
@@ -275,6 +282,11 @@ def init_db():
 
         try:
             c.execute("ALTER TABLE users ADD COLUMN last_seen TEXT")
+        except Exception:
+            pass
+
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN intake_history TEXT")
         except Exception:
             pass
 
@@ -617,6 +629,56 @@ def get_onboarding_history(telegram_id: int) -> list:
         return json.loads(raw)
     except Exception:
         return []
+
+
+def save_intake_history(telegram_id: int, history: list):
+    """Persist onboarding intake history to DB (survives Railway restarts)."""
+    import json
+    history_json = json.dumps(history, ensure_ascii=False)
+    conn = get_conn()
+    c = _cur(conn)
+    if _USE_POSTGRES:
+        c.execute(
+            "UPDATE users SET intake_history = %s WHERE telegram_id = %s",
+            (history_json, telegram_id)
+        )
+    else:
+        c.execute(
+            "UPDATE users SET intake_history = ? WHERE telegram_id = ?",
+            (history_json, telegram_id)
+        )
+    conn.commit()
+    _release(conn)
+
+
+def get_intake_history(telegram_id: int) -> list:
+    """Load persisted onboarding intake history from DB."""
+    import json
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT intake_history FROM users WHERE telegram_id = ?"), (telegram_id,))
+    row = c.fetchone()
+    _release(conn)
+    if row:
+        val = dict(row).get("intake_history")
+        if val:
+            try:
+                return json.loads(val)
+            except Exception:
+                return []
+    return []
+
+
+def clear_intake_history(telegram_id: int):
+    """Clear intake history after onboarding is complete."""
+    conn = get_conn()
+    c = _cur(conn)
+    if _USE_POSTGRES:
+        c.execute("UPDATE users SET intake_history = NULL WHERE telegram_id = %s", (telegram_id,))
+    else:
+        c.execute("UPDATE users SET intake_history = NULL WHERE telegram_id = ?", (telegram_id,))
+    conn.commit()
+    _release(conn)
 
 
 # --- Workouts ---

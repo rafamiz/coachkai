@@ -240,7 +240,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     db.upsert_user(telegram_id, onboarding_complete=0)
     context.user_data.clear()
-    context.user_data["intake_history"] = []
+    db.clear_intake_history(telegram_id)
 
     # Start conversational intake
     ai.reset_turn_cost()
@@ -250,10 +250,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\u00bfC\u00f3mo te llam\u00e1s?"
     )
 
-    context.user_data["intake_history"] = [
+    history = [
         {"role": "user", "content": "hola, quiero empezar con el bot"},
         {"role": "assistant", "content": reply},
     ]
+    db.save_intake_history(telegram_id, history)
+    context.user_data["intake_history"] = history  # keep in RAM as cache too
 
     await update.message.reply_text(reply)
 
@@ -420,7 +422,7 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         activity_level=None,
     )
     context.user_data.clear()
-    context.user_data["intake_history"] = []
+    db.clear_intake_history(telegram_id)
 
     # Start conversational intake
     ai.reset_turn_cost()
@@ -430,10 +432,12 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Cont\u00e1me, \u00bfc\u00f3mo te llam\u00e1s?"
     )
 
-    context.user_data["intake_history"] = [
+    history = [
         {"role": "user", "content": "hola, quiero empezar de nuevo con el bot"},
         {"role": "assistant", "content": reply},
     ]
+    db.save_intake_history(telegram_id, history)
+    context.user_data["intake_history"] = history  # keep in RAM as cache too
 
     await update.message.reply_text(reply)
 
@@ -742,18 +746,32 @@ async def _handle_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     text = update.message.text.strip()
 
-    history = context.user_data.get("intake_history", [])
+    # Load history from DB (survives Railway restarts)
+    history = db.get_intake_history(telegram_id)
+    # Fall back to RAM cache if DB is empty (e.g. very first message before upsert)
+    if not history:
+        history = context.user_data.get("intake_history", [])
 
     await update.message.chat.send_action("typing")
     ai.reset_turn_cost()
-    result = await ai.intake_turn(history, text)
 
-    # Update stored history
-    updated_history = history + [
-        {"role": "user", "content": text},
-        {"role": "assistant", "content": result.get("reply") or ""},
-    ]
-    context.user_data["intake_history"] = updated_history[-40:]
+    # If no history at all, something went wrong - restart intake from scratch
+    if not history:
+        result = await ai.intake_turn([], text)
+        reply = result.get("reply") or "Cont\u00e1me un poco m\u00e1s."
+        new_history = [
+            {"role": "user", "content": text},
+            {"role": "assistant", "content": reply},
+        ]
+        db.save_intake_history(telegram_id, new_history)
+        context.user_data["intake_history"] = new_history
+        try:
+            await update.message.reply_text(reply, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(reply.replace("*", "").replace("_", ""))
+        return
+
+    result = await ai.intake_turn(history, text)
 
     if result.get("done"):
         profile = result.get("profile", {})
@@ -777,14 +795,21 @@ async def _handle_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Ahora pod\u00e9s registrar tus comidas mand\u00e1ndome lo que com\u00eds. "
                 "\u00a1Empecemos! \U0001f957"
             )
+        # Clear intake history now that onboarding is done
+        db.clear_intake_history(telegram_id)
+        context.user_data.pop("intake_history", None)
         try:
             await update.message.reply_text(reply, parse_mode="Markdown")
         except Exception:
             await update.message.reply_text(reply.replace("*", "").replace("_", ""))
-        # Clear intake history now that onboarding is done
-        context.user_data.pop("intake_history", None)
     else:
         reply = result.get("reply") or "Cont\u00e1me un poco m\u00e1s."
+        updated_history = (history + [
+            {"role": "user", "content": text},
+            {"role": "assistant", "content": reply},
+        ])[-40:]
+        db.save_intake_history(telegram_id, updated_history)
+        context.user_data["intake_history"] = updated_history  # keep in RAM as cache too
         try:
             await update.message.reply_text(reply, parse_mode="Markdown")
         except Exception:
