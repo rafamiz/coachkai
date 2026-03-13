@@ -846,13 +846,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db.update_last_seen(telegram_id)
 
-    # Maintain conversation history (keep last 100 messages)
-
-    history = context.user_data.get("history", [])
-
+    # Maintain conversation history — load from DB so it survives restarts
+    history = db.get_chat_history(telegram_id)
+    if not history:
+        history = context.user_data.get("history", [])
     history = history + [{"role": "user", "content": text}]
-
-    context.user_data["history"] = history[-20:]
+    history = history[-20:]  # keep last 20 messages
 
 
 
@@ -882,10 +881,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         summary = f"Registr\u00e9 tu comida: {detected} (~{calories} kcal)."
 
-        history = history + [{"role": "assistant", "content": summary}]
-
-        context.user_data["history"] = history[-20:]
-
+        history_with_reply = history + [{"role": "assistant", "content": summary}]
+        history_with_reply = history_with_reply[-20:]
+        db.save_chat_history(telegram_id, history_with_reply)
+        context.user_data["history"] = history_with_reply
         return
 
 
@@ -1066,8 +1065,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"[handle_message] reminder parse error: {e}, time_str={time_str_orig!r}")
             reply = "No pude entender el horario. Podés decirme 'avisame a las 21:30' o 'recordame a las 9'."
-        history = history + [{"role": "assistant", "content": reply}]
-        context.user_data["history"] = history[-20:]
+        history_with_reply = history + [{"role": "assistant", "content": reply}]
+        history_with_reply = history_with_reply[-20:]
+        db.save_chat_history(telegram_id, history_with_reply)
+        context.user_data["history"] = history_with_reply
         await update.message.reply_text(reply)
         return
 
@@ -1119,9 +1120,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-    history = history + [{"role": "assistant", "content": reply}]
-
-    context.user_data["history"] = history[-20:]
+    history_with_reply = history + [{"role": "assistant", "content": reply}]
+    history_with_reply = history_with_reply[-20:]
+    db.save_chat_history(telegram_id, history_with_reply)
+    context.user_data["history"] = history_with_reply  # keep RAM cache too
 
 
 

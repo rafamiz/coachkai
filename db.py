@@ -144,6 +144,12 @@ def init_db():
         except Exception:
             conn.rollback()
 
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_history TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
                 id SERIAL PRIMARY KEY,
@@ -246,7 +252,8 @@ def init_db():
                 onboarding_complete INTEGER DEFAULT 0,
                 profile_text TEXT,
                 onboarding_history TEXT,
-                intake_history TEXT
+                intake_history TEXT,
+                chat_history TEXT
             )
         """)
 
@@ -287,6 +294,11 @@ def init_db():
 
         try:
             c.execute("ALTER TABLE users ADD COLUMN intake_history TEXT")
+        except Exception:
+            pass
+
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN chat_history TEXT")
         except Exception:
             pass
 
@@ -679,6 +691,42 @@ def clear_intake_history(telegram_id: int):
         c.execute("UPDATE users SET intake_history = NULL WHERE telegram_id = ?", (telegram_id,))
     conn.commit()
     _release(conn)
+
+def save_chat_history(telegram_id: int, history: list) -> None:
+    """Persist conversation history to DB (survives Railway/Render restarts)."""
+    import json
+    data = json.dumps(history, ensure_ascii=False)
+    conn = get_conn()
+    c = _cur(conn)
+    if _USE_POSTGRES:
+        c.execute(
+            "UPDATE users SET chat_history = %s WHERE telegram_id = %s",
+            (data, telegram_id)
+        )
+    else:
+        c.execute(
+            "UPDATE users SET chat_history = ? WHERE telegram_id = ?",
+            (data, telegram_id)
+        )
+    conn.commit()
+    _release(conn)
+
+
+def get_chat_history(telegram_id: int) -> list:
+    """Load persisted conversation history from DB."""
+    import json
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT chat_history FROM users WHERE telegram_id = ?"), (telegram_id,))
+    row = c.fetchone()
+    _release(conn)
+    if not row or not dict(row).get("chat_history"):
+        return []
+    try:
+        return json.loads(dict(row)["chat_history"])
+    except Exception:
+        return []
+
 
 
 # --- Workouts ---
