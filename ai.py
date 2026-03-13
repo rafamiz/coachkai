@@ -993,7 +993,8 @@ CONOCIMIENTO DE ALIMENTOS ARGENTINOS:
 - Chipas (75g bolsa): ~350kcal. Chipa unitaria: ~100kcal.
 - Mate (sin azúcar): 0kcal. Con azúcar (2 cucharaditas): ~30kcal.
 - Tostadas (pan lactal, 2 rebanadas): ~160kcal.
-- Franuís (Rapanuí): caramelos de frambuesa bañados en chocolate, marca Rapanuí de Bariloche. Paquete pequeño (~45g) ≈ 190kcal, 2g prot, 29g carbos, 7g grasa.
+- Frani\u00fas (Rapanu\u00ed): caramelos de frambuesa ba\u00f1ados en chocolate, marca Rapanu\u00ed de Bariloche. Paquete peque\u00f1o (~45g) \u2248 190kcal, 2g prot, 29g carbos, 7g grasa.
+- Rumbas (Terrabusi/Mondelez): galletitas rellenas de chocolate. 1 unidad \u2248 30kcal. Por 6 unidades: \u2248180kcal, 2g prot, 25g carbos, 7g grasa.
 
 You have the user's full identity profile and today's eating context (injected below).
 
@@ -1098,6 +1099,12 @@ REMINDERS (use set_reminder tool):
   * Do NOT set reminders for meals the user mentions ('a las 8 voy a cenar' = info, not a reminder request)
 - Don't mention the reminder unless asked — set it silently
 
+IDENTITY UPDATES (use update_user_identity) \u2014 llam\u00e1 cuando:
+- Usuario menciona horario de entrenamiento ("entreno los martes y jueves a las 9am", "voy al gym los lunes", "tengo f\u00fatbol los viernes") \u2192 llam\u00e1 update_user_identity con el campo training_schedule
+- Usuario cambia su peso ("me pes\u00e9 y peso X kg") \u2192 llam\u00e1 update_user_identity con weight_kg
+- Usuario cambia su objetivo o nivel de actividad \u2192 llam\u00e1 update_user_identity
+- Usuario menciona una preferencia o restricci\u00f3n alimentaria nueva
+
 PATTERN DETECTION & MEMORY (use update_user_identity):
 
 
@@ -1106,7 +1113,7 @@ PATTERN DETECTION & MEMORY (use update_user_identity):
 
 
 
-- When the user says "record?? que...", "siempre como...", "los lunes voy al gym", etc. ??? update identity immediately
+- When the user says "record\u00e1 que...", "siempre como...", "los lunes voy al gym", etc. \u2014 update identity immediately
 
 
 
