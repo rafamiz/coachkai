@@ -158,6 +158,12 @@ def init_db():
         except Exception:
             conn.rollback()
 
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_calories INTEGER")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
                 id SERIAL PRIMARY KEY,

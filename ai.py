@@ -417,6 +417,8 @@ def _build_profile_context(user: dict, memories: list = None) -> str:
         ctx += f"\n\n[USER IDENTITY]\n{user['profile_text']}"
     if user.get("training_schedule"):
         ctx += "\n[TRAINING SCHEDULE] " + user['training_schedule']
+    if user.get("daily_calories"):
+        ctx += f"\n[OBJETIVO CALOR\u00cdAS] {user['daily_calories']} kcal/d\u00eda (personalizado)"
 
 
 
