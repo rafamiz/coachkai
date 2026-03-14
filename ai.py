@@ -771,195 +771,60 @@ async def onboarding_welcome(name: str) -> str:
 
 
 async def generate_meal_plan(user: dict) -> dict:
-
-
-
     """Returns dict with plan_text and meal_options (breakfasts, lunches, dinners)."""
-
-
-
     profile = (
-
-
-
-        f"Nombre: {user.get('name','?')}, Edad: {user.get('age','?')} a??os, "
-
-
-
+        f"Nombre: {user.get('name','?')}, Edad: {user.get('age','?')} años, "
         f"Peso: {user.get('weight_kg','?')} kg, Altura: {user.get('height_cm','?')} cm, "
-
-
-
         f"Objetivo: {user.get('goal','?')}, Actividad: {user.get('activity_level','?')}"
-
-
-
     )
 
-
+    if user.get("daily_calories"):
+        profile += f", Calorías diarias objetivo: {user['daily_calories']} kcal"
 
     profile_text = user.get("profile_text", "")
-
-
-
     if profile_text:
-
-
-
-        profile += f"\n\nPerfil detallado:\n{profile_text[:500]}"
-
-
-
-
-
-
+        profile += "\n\nPerfil detallado:\n" + profile_text[:500]
 
     raw = await _ask([{
-
-
-
         "role": "user",
-
-
-
         "content": (
-
-
-
-            f"Gener?? un plan de alimentaci??n personalizado para:\n{profile}\n\n"
-
-
-
-            "Respond?? SOLO con JSON v??lido con esta estructura exacta:\n"
-
-
-
+            "Generá un plan de alimentación personalizado para:\n" + profile + "\n\n"
+            "Respondé SOLO con JSON válido con esta estructura exacta (sin markdown, sin texto extra):\n"
             "{\n"
-
-
-
             '  "calories": 2000,\n'
-
-
-
             '  "protein_g": 150,\n'
-
-
-
             '  "carbs_g": 200,\n'
-
-
-
             '  "fat_g": 65,\n'
-
-
-
             '  "summary": "Resumen breve del plan (2-3 oraciones)",\n'
-
-
-
             '  "tips": ["tip 1", "tip 2", "tip 3"],\n'
-
-
-
-            '  "breakfasts": ["Opci??n 1", "Opci??n 2", "Opci??n 3"],\n'
-
-
-
-            '  "lunches": ["Opci??n 1", "Opci??n 2", "Opci??n 3"],\n'
-
-
-
-            '  "dinners": ["Opci??n 1", "Opci??n 2", "Opci??n 3"],\n'
-
-
-
-            '  "snacks": ["Opci??n 1", "Opci??n 2"]\n'
-
-
-
+            '  "breakfasts": ["Opción 1 con porciones", "Opción 2", "Opción 3"],\n'
+            '  "lunches": ["Opción 1 con porciones", "Opción 2", "Opción 3"],\n'
+            '  "dinners": ["Opción 1 con porciones", "Opción 2", "Opción 3"],\n'
+            '  "snacks": ["Snack 1", "Snack 2"]\n'
             "}\n"
-
-
-
-            "Las opciones deben ser espec??ficas, con porciones aproximadas. Sin texto extra fuera del JSON."
-
-
-
+            "Las opciones deben ser específicas, con porciones aproximadas. Respondé SOLO el JSON, sin ningún texto antes o después."
         )
-
-
-
     }])
-
-
-
-
-
-
 
     import json, re
 
-
-
     try:
-
-
-
-        # Extract JSON from response
-
-
-
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-
-
-
+        # Strip markdown code fences if present
+        cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        # Extract JSON object
+        match = re.search(r'\{.*\}', cleaned, re.DOTALL)
         if match:
-
-
-
             return json.loads(match.group())
-
-
-
     except Exception:
-
-
-
         pass
 
-
-
     # Fallback
-
-
-
     return {
-
-
-
         "calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0,
-
-
-
         "summary": raw, "tips": [],
-
-
-
         "breakfasts": [], "lunches": [], "dinners": [], "snacks": []
-
-
-
     }
-
-
-
-
-
-
-
-
-
 
 
 PROCESS_SYSTEM = """You are Coach Kai, an Argentine nutrition coach with a semiformal tone.
