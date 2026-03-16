@@ -976,6 +976,7 @@ REMINDERS (use set_reminder tool):
 IDENTITY UPDATES (use update_user_identity) \u2014 llam\u00e1 cuando:
 - Usuario menciona horario de entrenamiento ("entreno los martes y jueves a las 9am", "voy al gym los lunes", "tengo f\u00fatbol los viernes") \u2192 llam\u00e1 update_user_identity con el campo training_schedule
 - Usuario cambia su peso ("me pes\u00e9 y peso X kg") \u2192 llam\u00e1 update_user_identity con weight_kg
+- Usuario menciona un objetivo cal\u00f3rico diario ("cambi\u00e1 mis calor\u00edas a 2300", "quiero comer 1800 kcal") \u2192 llam\u00e1 update_user_identity con daily_calories
 - Usuario cambia su objetivo o nivel de actividad \u2192 llam\u00e1 update_user_identity
 - Usuario menciona una preferencia o restricci\u00f3n alimentaria nueva
 
@@ -1325,6 +1326,10 @@ UPDATE_IDENTITY_TOOL = {
             "training_schedule": {
                 "type": "string",
                 "description": "User's training/workout schedule (e.g. 'gym Tue/Thu/Sat 9am, padel Sundays')"
+            },
+            "daily_calories": {
+                "type": "integer",
+                "description": "Daily calorie goal in kcal. Set when user mentions their calorie target or goal."
             }
 
 

@@ -1096,6 +1096,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 kwargs["activity_level"] = update_data["activity_level"]
             if update_data.get("training_schedule"):
                 kwargs["training_schedule"] = update_data["training_schedule"]
+            if update_data.get("daily_calories"):
+                kwargs["daily_calories"] = update_data["daily_calories"]
 
             if update_data.get("identity_markdown"):
 
