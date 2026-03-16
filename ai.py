@@ -1777,6 +1777,22 @@ LOG_MEAL_TOOL = {
 
 
 
+            },
+
+
+
+            "date_offset": {
+
+
+
+                "type": "integer",
+
+
+
+                "description": "Days offset from today: 0=today (default), -1=yesterday. Use -1 when user says 'ayer', 'anoche', 'el otro d\u00eda'. Default 0."
+
+
+
             }
 
 
@@ -2308,6 +2324,11 @@ async def process_message(
 
 
 
+                import logging as _log
+                _log.getLogger(__name__).info(
+                    f"[ai] log_meal tool called: {block.input.get('detected_food','?')} "
+                    f"{block.input.get('calories','?')}kcal date_offset={block.input.get('date_offset', 0)}"
+                )
                 return {"type": "meal", "meal": block.input, "reply": text_reply}
 
 

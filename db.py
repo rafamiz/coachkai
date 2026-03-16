@@ -487,12 +487,14 @@ def get_all_users():
 
 def add_meal(user_id: int, telegram_id: int, description: str, photo_path: str,
              calories_est: int, meal_type: str, claude_analysis: str,
-             proteins_g: float = 0, carbs_g: float = 0, fats_g: float = 0):
+             proteins_g: float = 0, carbs_g: float = 0, fats_g: float = 0,
+             eaten_at: str = None):
     conn = get_conn()
     c = _cur(conn)
-    import pytz as _tz
-    _BA = _tz.timezone("America/Argentina/Buenos_Aires")
-    eaten_at = datetime.now(_BA).strftime("%Y-%m-%d %H:%M:%S")
+    if eaten_at is None:
+        import pytz as _tz
+        _BA = _tz.timezone("America/Argentina/Buenos_Aires")
+        eaten_at = datetime.now(_BA).strftime("%Y-%m-%d %H:%M:%S")
     c.execute(_q("""
         INSERT INTO meals (user_id, telegram_id, description, photo_path, calories_est, meal_type, claude_analysis, proteins_g, carbs_g, fats_g, eaten_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

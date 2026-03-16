@@ -158,7 +158,13 @@ async def _save_and_reply_meal(update: Update, user: dict, result: dict):
 
     telegram_id = update.effective_user.id
 
+    date_offset = int(meal.get("date_offset") or 0)
+    eaten_at = (datetime.now(_BA_TZ) + timedelta(days=date_offset)).strftime("%Y-%m-%d %H:%M:%S")
 
+    logger.info(
+        f"[meal] saving for {telegram_id}: {detected!r} {calories}kcal "
+        f"offset={date_offset} eaten_at={eaten_at}"
+    )
 
     db.add_meal(
 
@@ -182,7 +188,11 @@ async def _save_and_reply_meal(update: Update, user: dict, result: dict):
 
         fats_g=fats,
 
+        eaten_at=eaten_at,
+
     )
+
+    logger.info(f"[meal] DB save OK for {telegram_id}: {detected!r}")
 
 
 
