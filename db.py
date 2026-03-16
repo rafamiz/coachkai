@@ -170,6 +170,12 @@ def init_db():
         except Exception:
             conn.rollback()
 
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_proactive_sent TIMESTAMP")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
                 id SERIAL PRIMARY KEY,
@@ -330,6 +336,11 @@ def init_db():
 
         try:
             c.execute("ALTER TABLE users ADD COLUMN dashboard_token TEXT")
+        except Exception:
+            pass
+
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN last_proactive_sent TEXT")
         except Exception:
             pass
 
@@ -1055,3 +1066,35 @@ def get_last_seen(telegram_id: int):
     if row:
         return dict(row).get("last_seen")
     return None
+
+
+def get_last_proactive_sent(telegram_id: int):
+    """Returns datetime of last proactive message sent, or None."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT last_proactive_sent FROM users WHERE telegram_id = ?"), (telegram_id,))
+    row = c.fetchone()
+    _release(conn)
+    if not row:
+        return None
+    val = dict(row).get("last_proactive_sent")
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val
+    try:
+        return datetime.fromisoformat(str(val))
+    except Exception:
+        return None
+
+
+def update_last_proactive_sent(telegram_id: int):
+    """Updates last_proactive_sent to now() for the user."""
+    conn = get_conn()
+    c = _cur(conn)
+    if _USE_POSTGRES:
+        c.execute("UPDATE users SET last_proactive_sent = NOW() WHERE telegram_id = %s", (telegram_id,))
+    else:
+        c.execute("UPDATE users SET last_proactive_sent = datetime('now') WHERE telegram_id = ?", (telegram_id,))
+    conn.commit()
+    _release(conn)

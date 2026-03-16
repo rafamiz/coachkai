@@ -19,6 +19,22 @@ _scheduler = None
 
 MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"]
 
+PROACTIVE_COOLDOWN_MINUTES = 45
+
+
+async def _can_send_proactive(telegram_id: int) -> bool:
+    """Returns True if enough time has passed since last proactive message."""
+    last = db.get_last_proactive_sent(telegram_id)
+    if last is None:
+        return True
+    import pytz
+    from datetime import timedelta
+    BA_TZ = pytz.timezone("America/Argentina/Buenos_Aires")
+    now = datetime.now(BA_TZ)
+    if last.tzinfo is None:
+        last = BA_TZ.localize(last)
+    return (now - last) >= timedelta(minutes=PROACTIVE_COOLDOWN_MINUTES)
+
 
 # ---------------------------------------------------------------------------
 # Scheduler lifecycle
@@ -329,6 +345,9 @@ async def check_proactive_messages():
 
 async def _send_proactive(user, telegram_id, trigger, trigger_info,
                           ftype, label, today_meals, today_workouts, daily_goal):
+    if not await _can_send_proactive(telegram_id):
+        logger.info(f"[scheduler] Cooldown active for {telegram_id}, skipping {ftype}/{label}")
+        return
     try:
         message = await ai.generate_proactive_message(
             user=user,
@@ -340,6 +359,7 @@ async def _send_proactive(user, telegram_id, trigger, trigger_info,
         )
         await _bot_app.bot.send_message(chat_id=telegram_id, text=message)
         db.add_followup(user["id"], message, ftype)
+        db.update_last_proactive_sent(telegram_id)
         logger.info(f"[scheduler] Sent {ftype}/{label} to {telegram_id}")
     except Exception as e:
         logger.error(f"[scheduler] Error sending {ftype} to {telegram_id}: {e}")
@@ -398,10 +418,14 @@ async def check_meal_absence():
             if hours_since >= 5:
                 uid = user.get("id", 0)
                 if not db.already_sent_followup_today(uid, "absence_nudge"):
+                    if not await _can_send_proactive(tid):
+                        logger.info(f"[scheduler] Cooldown active for {tid}, skipping absence nudge")
+                        continue
                     await _bot_app.bot.send_message(
                         chat_id=tid,
                         text=f"\u23f0 Pasaron {int(hours_since)}hs desde tu ultima comida registrada. Ya comiste algo? No te olvides de registrarlo."
                     )
+                    db.update_last_proactive_sent(tid)
                     db.add_followup(uid, f"absence_nudge_{now.hour}", "absence_nudge")
         except Exception as e:
             logger.error(f"[scheduler] absence check error for {tid}: {e}")
@@ -449,6 +473,10 @@ async def check_training_reminders():
 
             db.add_followup(uid, fkey, fkey)
 
+            if not await _can_send_proactive(tid):
+                logger.info(f"[scheduler] Cooldown active for {tid}, skipping pre-workout reminder")
+                continue
+
             try:
                 goal = user.get("goal", "maintain")
                 tip = await ai._ask([{"role": "user", "content":
@@ -456,6 +484,7 @@ async def check_training_reminders():
                     f"Su objetivo es {goal}. Algo concreto: qu\u00e9 comer antes del gym. "
                     f"Tono: semiformal argentino, directo. Empez\u00e1 con '\u23f0 En 30 min ten\u00e9s el gym.'"}])
                 await _bot_app.bot.send_message(chat_id=tid, text=tip)
+                db.update_last_proactive_sent(tid)
                 logger.info(f"[scheduler] Sent pre-workout reminder to {tid}")
             except Exception as e:
                 logger.error(f"[scheduler] Pre-workout reminder error for {tid}: {e}")
@@ -550,10 +579,15 @@ async def send_meal_checkin(meal_type: str):
         # Mark as sent BEFORE sending to prevent duplicates on retry
         db.add_followup(uid, followup_key, followup_key)
 
+        if not await _can_send_proactive(tid):
+            logger.info(f"[scheduler] Cooldown active for {tid}, skipping {meal_type} checkin")
+            continue
+
         try:
             memories = db.get_memories(tid, limit=10)
             msg = await ai.generate_checkin_message(user, meal_type, memories)
             await _bot_app.bot.send_message(chat_id=tid, text=msg)
+            db.update_last_proactive_sent(tid)
             logger.info(f"[scheduler] Sent {meal_type} checkin to {tid}")
         except Exception as e:
             logger.error(f"[scheduler] {meal_type} checkin error for {tid}: {e}")
@@ -600,6 +634,10 @@ async def send_inactivity_checkin():
             # Mark as sent BEFORE sending to prevent duplicates on retry
             db.add_followup(uid, followup_key, followup_key)
 
+            if not await _can_send_proactive(tid):
+                logger.info(f"[scheduler] Cooldown active for {tid}, skipping inactivity checkin")
+                continue
+
             memories = db.get_memories(tid, limit=10)
             # Pick the right trigger based on current hour
             if 6 <= now.hour < 12:
@@ -612,6 +650,7 @@ async def send_inactivity_checkin():
                 inactivity_trigger = "dinner"
             msg = await ai.generate_checkin_message(user, inactivity_trigger, memories)
             await _bot_app.bot.send_message(chat_id=tid, text=msg)
+            db.update_last_proactive_sent(tid)
             logger.info(f"[scheduler] Sent inactivity checkin to {tid} ({hours_inactive:.1f}h inactive)")
         except Exception as e:
             logger.error(f"[scheduler] inactivity checkin error for {tid}: {e}")
