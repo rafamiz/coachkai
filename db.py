@@ -164,6 +164,12 @@ def init_db():
         except Exception:
             conn.rollback()
 
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS dashboard_token TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
                 id SERIAL PRIMARY KEY,
@@ -322,6 +328,11 @@ def init_db():
         except Exception:
             pass
 
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN dashboard_token TEXT")
+        except Exception:
+            pass
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -441,6 +452,23 @@ def delete_onboarding_token(token: str):
     c.execute(_q("DELETE FROM onboarding_tokens WHERE token = ?"), (token,))
     conn.commit()
     _release(conn)
+
+
+def get_or_create_dashboard_token(telegram_id: int) -> str:
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT dashboard_token FROM users WHERE telegram_id = ?"), (telegram_id,))
+    row = c.fetchone()
+    if row:
+        token = dict(row).get("dashboard_token")
+        if token:
+            _release(conn)
+            return token
+    token = secrets.token_hex(16)
+    c.execute(_q("UPDATE users SET dashboard_token = ? WHERE telegram_id = ?"), (token, telegram_id))
+    conn.commit()
+    _release(conn)
+    return token
 
 
 # --- Users ---

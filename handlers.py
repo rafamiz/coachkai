@@ -857,6 +857,18 @@ async def _handle_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "Cuando quer\u00e1s tu plan de comidas, us\u00e1 /plan \U0001f4cb"
             )
+
+        # Send dashboard URL
+        try:
+            _dtok = db.get_or_create_dashboard_token(telegram_id)
+            _durl = f"https://coachkai-production.up.railway.app/dashboard/{telegram_id}?token={_dtok}"
+            await update.message.reply_text(
+                f"\U0001f4ca *Tu dashboard personal:*\n{_durl}\n\n"
+                f"Ah\u00ed pod\u00e9s ver tus calor\u00edas y macros del d\u00eda \U0001f525",
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.error(f"[intake] dashboard URL send failed: {e}")
     else:
         reply = result.get("reply") or "Cont\u00e1me un poco m\u00e1s."
         updated_history = (history + [
@@ -900,6 +912,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     db.update_last_seen(telegram_id)
+
+    # Dashboard URL request
+    _dashboard_kws = ["dashboard", "ver mi progreso", "mi dashboard", "mi panel", "ver mi dashboard"]
+    if any(kw in text.lower() for kw in _dashboard_kws):
+        _dtok = db.get_or_create_dashboard_token(telegram_id)
+        _durl = f"https://coachkai-production.up.railway.app/dashboard/{telegram_id}?token={_dtok}"
+        await update.message.reply_text(
+            f"\U0001f4ca *Tu dashboard de nutrici\u00f3n:*\n{_durl}",
+            parse_mode="Markdown",
+        )
+        return
 
     # Maintain conversation history — load from DB so it survives restarts
     history = db.get_chat_history(telegram_id)

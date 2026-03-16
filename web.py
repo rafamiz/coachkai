@@ -140,6 +140,31 @@ _INVALID_HTML = """\
 </html>
 """
 
+_FORBIDDEN_HTML = """\
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NutriBot \u2014 Acceso denegado</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px}
+  .card{background:#fff;border-radius:18px;padding:40px 28px;text-align:center;max-width:360px;width:100%;box-shadow:0 2px 16px rgba(0,0,0,.09)}
+  .icon{font-size:3rem;margin-bottom:16px}
+  h1{font-size:1.3rem;margin-bottom:10px}
+  p{color:#666;font-size:.93rem;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">\U0001f512</div>
+  <h1>Acceso denegado</h1>
+  <p>Token inv\u00e1lido o faltante. Solicit\u00e1 el link desde Telegram.</p>
+</div>
+</body>
+</html>
+"""
+
 
 def _render_form(error: str = "", data: dict = None):
     d = data or {}
@@ -383,6 +408,7 @@ _DASHBOARD_HTML = """\
 </div>
 <script>
 var TG_ID = '__TELEGRAM_ID__';
+var TOKEN = '__TOKEN__';
 var currentDate = new Date();
 
 function fmtDate(d) {
@@ -413,7 +439,7 @@ var MEAL_ORDER = ['breakfast','desayuno','lunch','almuerzo','snack','merienda','
 function loadData() {
   var dateStr = fmtDate(currentDate);
   document.getElementById('date-label').textContent = fmtDateDisplay(currentDate);
-  fetch('/api/nutrition/' + TG_ID + '?date=' + dateStr)
+  fetch('/api/nutrition/' + TG_ID + '?date=' + dateStr + '&token=' + TOKEN)
     .then(function(r){ return r.json(); })
     .then(function(data){ render(data); })
     .catch(function(){
@@ -550,6 +576,11 @@ async def _api_nutrition(request: web.Request) -> web.Response:
     except (ValueError, KeyError):
         return web.Response(text='{"error":"invalid id"}', content_type="application/json", status=400)
 
+    token_param = request.rel_url.query.get("token", "")
+    expected_token = db.get_or_create_dashboard_token(telegram_id)
+    if not token_param or token_param != expected_token:
+        return web.Response(text='{"error":"forbidden"}', content_type="application/json", status=403)
+
     date_str = request.rel_url.query.get("date", "")
     if not date_str:
         _BA = pytz.timezone("America/Argentina/Buenos_Aires")
@@ -601,7 +632,12 @@ async def _get_dashboard(request: web.Request) -> web.Response:
     except (ValueError, KeyError):
         return web.Response(text="Invalid ID", status=400)
 
-    html = _DASHBOARD_HTML.replace("__TELEGRAM_ID__", str(telegram_id))
+    token_param = request.rel_url.query.get("token", "")
+    expected_token = db.get_or_create_dashboard_token(telegram_id)
+    if not token_param or token_param != expected_token:
+        return web.Response(text=_FORBIDDEN_HTML, content_type="text/html", status=403)
+
+    html = _DASHBOARD_HTML.replace("__TELEGRAM_ID__", str(telegram_id)).replace("__TOKEN__", token_param)
     return web.Response(text=html, content_type="text/html")
 
 
