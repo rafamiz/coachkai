@@ -123,6 +123,30 @@ def get_turn_cost() -> float:
 
 
 
+_PERSONALITY_MENTOR = (
+    "PERSONALIDAD: Sos un coach cálido y motivador. Usás 'vos'. Celebrás cada logro, por pequeño que sea. "
+    "Cuando el usuario se equivoca, lo guiás con empatía. Nunca sos duro. Usás emojis con moderación. "
+    "Sos como ese amigo que siempre te banca."
+)
+
+_PERSONALITY_ROASTER = (
+    "PERSONALIDAD: Sos un coach despiadado pero que genuinamente quiere que el usuario mejore. Usás 'vos'. "
+    "Cuando el usuario come mal o no cumple, lo destroys con humor ácido pero sin ser cruel. "
+    "Ejemplos de tu estilo: 'Tercera pizza esta semana. Impresionante la consistencia... lástima que sea para destruirte.', "
+    "'Tu Apple Watch se avergüenza de estar en tu muñeca.', "
+    "'2000 pasos hoy. Mi abuela hace más ejercicio y tiene 87 años.' "
+    "Cuando el usuario hace algo bien, lo reconocés brevemente pero siempre encontrás algo para empujar más. "
+    "Nunca sos malo de verdad — sos el entrenador que nadie quiere pero que todos necesitan."
+)
+
+
+def _get_personality(coach_mode: str) -> str:
+    """Return the personality prompt snippet for the given coach_mode."""
+    if coach_mode == "roaster":
+        return "\n\n" + _PERSONALITY_ROASTER
+    return "\n\n" + _PERSONALITY_MENTOR
+
+
 SYSTEM_BASE = (
 
     "Sos Coach Kai, un coach de nutrici\u00f3n personal. Tu tono es semiformal: argentino pero prolijo. "
@@ -770,8 +794,10 @@ async def onboarding_welcome(name: str) -> str:
 
 
 
-async def generate_meal_plan(user: dict) -> dict:
+async def generate_meal_plan(user: dict, coach_mode: str = None) -> dict:
     """Returns dict with plan_text and meal_options (breakfasts, lunches, dinners)."""
+    if coach_mode is None:
+        coach_mode = user.get("coach_mode", "mentor")
     profile = (
         f"Nombre: {user.get('name','?')}, Edad: {user.get('age','?')} años, "
         f"Peso: {user.get('weight_kg','?')} kg, Altura: {user.get('height_cm','?')} cm, "
@@ -804,7 +830,7 @@ async def generate_meal_plan(user: dict) -> dict:
             "}\n"
             "Las opciones deben ser específicas, con porciones aproximadas. Respondé SOLO el JSON, sin ningún texto antes o después."
         )
-    }])
+    }], system=SYSTEM_BASE + _get_personality(coach_mode))
 
     import json, re
 
@@ -1844,6 +1870,8 @@ async def process_message(
 
     photo_path: str = None,
 
+    coach_mode: str = None,
+
 
 
 ) -> dict:
@@ -2173,7 +2201,8 @@ async def process_message(
 
 
 
-    system = PROCESS_SYSTEM + _build_profile_context(user, memories) + today_ctx
+    _coach_mode = coach_mode or user.get("coach_mode", "mentor")
+    system = PROCESS_SYSTEM + _get_personality(_coach_mode) + _build_profile_context(user, memories) + today_ctx
 
 
 
@@ -2444,6 +2473,8 @@ async def generate_proactive_message(
 
     daily_goal: int,
 
+    coach_mode: str = None,
+
 
 
 ) -> str:
@@ -2686,6 +2717,7 @@ async def generate_proactive_message(
 
 
 
+        + _get_personality(coach_mode or user.get("coach_mode", "mentor"))
         + profile_ctx + today_ctx
 
 
@@ -2706,7 +2738,7 @@ async def generate_proactive_message(
 
 
 
-async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_goal: int) -> str:
+async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_goal: int, coach_mode: str = None) -> str:
 
 
 
@@ -2758,7 +2790,7 @@ async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_
 
 
 
-    return await _ask([{"role": "user", "content": prompt}])
+    return await _ask([{"role": "user", "content": prompt}], system=SYSTEM_BASE + _get_personality(coach_mode or user.get("coach_mode", "mentor")))
 
 
 
@@ -2778,7 +2810,7 @@ async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_
 
 
 
-async def generate_daily_summary(user: dict, meals: list) -> str:
+async def generate_daily_summary(user: dict, meals: list, coach_mode: str = None) -> str:
 
 
 
@@ -2834,7 +2866,7 @@ async def generate_daily_summary(user: dict, meals: list) -> str:
 
 
 
-    return await _ask([{"role": "user", "content": prompt}])
+    return await _ask([{"role": "user", "content": prompt}], system=SYSTEM_BASE + _get_personality(coach_mode or user.get("coach_mode", "mentor")))
 
 # ---------------------------------------------------------------------------
 # Proactive check-in message generator (simple version for meal/inactivity triggers)
@@ -2854,7 +2886,7 @@ def get_today_meals_summary(telegram_id: int) -> str:
         return "No data."
 
 
-async def generate_checkin_message(user: dict, trigger: str, memories: list = None) -> str:
+async def generate_checkin_message(user: dict, trigger: str, memories: list = None, coach_mode: str = None) -> str:
     """Generate a proactive check-in message for the user.
 
     trigger: 'breakfast', 'lunch', 'dinner', 'inactivity', 'evening_summary'
@@ -2900,7 +2932,7 @@ async def generate_checkin_message(user: dict, trigger: str, memories: list = No
     today_meals_summary = get_today_meals_summary(user.get("telegram_id", 0))
 
     system = (
-        SYSTEM_BASE + profile_ctx
+        SYSTEM_BASE + _get_personality(coach_mode or user.get("coach_mode", "mentor")) + profile_ctx
         + f"\n\n[TODAY SO FAR]\n{today_meals_summary}"
         + "\n\nYou are initiating a conversation proactively. Keep it to 1-2 lines max. Natural, warm, not pushy."
     )
@@ -2914,3 +2946,29 @@ async def generate_checkin_message(user: dict, trigger: str, memories: list = No
         messages=[{"role": "user", "content": prompt}],
     )
     return resp.content[0].text.strip()
+
+
+async def generate_macro_nudge(user: dict, total_cal: int, daily_goal: int, coach_mode: str = None) -> str:
+    """Generate the 19:00 end-of-day macro closing nudge."""
+    remaining = max(0, daily_goal - total_cal)
+    _coach_mode = coach_mode or user.get("coach_mode", "mentor")
+
+    if _coach_mode == "roaster":
+        instruction = (
+            f"Son las 19:00 en Argentina. {user.get('name', 'El usuario')} lleva {total_cal} kcal hoy "
+            f"y le quedan ~{remaining} kcal para llegar a su meta de {daily_goal} kcal. "
+            "Mandá un mensaje cortísimo (1-2 líneas) al estilo roaster: "
+            "si le quedan pocas calorías, presionalo para que no la cague en la cena. "
+            "Si ya pasó la meta, destroyalo con humor ácido pero motivador. "
+            "Estilo: directo, sin filtro, con humor. Mencioná las calorías concretas."
+        )
+    else:
+        instruction = (
+            f"Son las 19:00 en Argentina. {user.get('name', 'El usuario')} lleva {total_cal} kcal hoy "
+            f"y le quedan ~{remaining} kcal para llegar a su meta de {daily_goal} kcal. "
+            "Mandá un mensaje cortísimo (1-2 líneas) motivador para ayudarlo a cerrar bien el día. "
+            "Sugerí qué podría comer en la cena para llegar a su meta. Usá 'vos'. Cálido y concreto."
+        )
+
+    system = SYSTEM_BASE + _get_personality(_coach_mode) + _build_profile_context(user)
+    return await _ask([{"role": "user", "content": instruction}], system=system)

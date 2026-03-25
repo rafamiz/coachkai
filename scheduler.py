@@ -57,6 +57,8 @@ def start_scheduler(app):
     _scheduler.add_job(check_training_reminders, "interval", minutes=5, id="training_reminders")
     # Inactivity check every hour
     _scheduler.add_job(send_inactivity_checkin, "interval", hours=1, id="inactivity_check")
+    # Macro closing nudge at 19:00
+    _scheduler.add_job(send_macro_nudge, "cron", hour=19, minute=0, id="macro_nudge")
     _scheduler.start()
     logger.info("Scheduler started")
 
@@ -356,6 +358,7 @@ async def _send_proactive(user, telegram_id, trigger, trigger_info,
             today_meals=today_meals,
             today_workouts=today_workouts,
             daily_goal=daily_goal,
+            coach_mode=user.get("coach_mode", "mentor"),
         )
         await _bot_app.bot.send_message(chat_id=telegram_id, text=message)
         db.add_followup(user["id"], message, ftype)
@@ -482,7 +485,8 @@ async def check_training_reminders():
                 tip = await ai._ask([{"role": "user", "content":
                     f"Dales a {user.get('name', 'vos')} un tip nutricional corto (2 l\u00edneas m\u00e1x) para antes de entrenar. "
                     f"Su objetivo es {goal}. Algo concreto: qu\u00e9 comer antes del gym. "
-                    f"Tono: semiformal argentino, directo. Empez\u00e1 con '\u23f0 En 30 min ten\u00e9s el gym.'"}])
+                    f"Tono: semiformal argentino, directo. Empez\u00e1 con '\u23f0 En 30 min ten\u00e9s el gym.'"}],
+                    system=ai.SYSTEM_BASE + ai._get_personality(user.get("coach_mode", "mentor")))
                 await _bot_app.bot.send_message(chat_id=tid, text=tip)
                 db.update_last_proactive_sent(tid)
                 logger.info(f"[scheduler] Sent pre-workout reminder to {tid}")
@@ -510,15 +514,45 @@ async def send_daily_summaries():
             logger.error(f"[scheduler] Error sending daily summary to {telegram_id}: {e}")
 
 
+async def send_macro_nudge():
+    """Send end-of-day macro closing nudge at 19:00 to users who logged ≥1 meal today."""
+    if _bot_app is None:
+        return
+    users = db.get_all_users()
+    for user in users:
+        telegram_id = user["telegram_id"]
+        user_id = user["id"]
+        meals = db.get_today_meals(telegram_id)
+        if not meals:
+            continue
+        if db.already_sent_followup_today(user_id, "macro_nudge"):
+            continue
+        if not await _can_send_proactive(telegram_id):
+            logger.info(f"[scheduler] Cooldown active for {telegram_id}, skipping macro nudge")
+            continue
+        try:
+            daily_goal = await _build_daily_goal(user)
+            total_cal = sum(m.get("calories_est", 0) or 0 for m in meals)
+            coach_mode = user.get("coach_mode", "mentor")
+            message = await ai.generate_macro_nudge(user, total_cal, daily_goal, coach_mode=coach_mode)
+            await _bot_app.bot.send_message(chat_id=telegram_id, text=message)
+            db.add_followup(user_id, "macro_nudge", "macro_nudge")
+            db.update_last_proactive_sent(telegram_id)
+            logger.info(f"[scheduler] Sent macro nudge to {telegram_id} ({total_cal}/{daily_goal} kcal, mode={coach_mode})")
+        except Exception as e:
+            logger.error(f"[scheduler] Error sending macro nudge to {telegram_id}: {e}")
+
+
 async def _send_summary_to_user(user: dict, meals: list):
     telegram_id = user["telegram_id"]
     daily_goal  = charts.estimate_daily_calories(user)
     total_cal   = sum(m.get("calories_est", 0) or 0 for m in meals)
     workouts    = db.get_today_workouts(telegram_id)
 
+    coach_mode = user.get("coach_mode", "mentor")
     try:
         png_bytes = await charts.generate_daily_summary_chart(user, meals)
-        caption   = await ai.generate_chart_caption(user, meals, total_cal, daily_goal)
+        caption   = await ai.generate_chart_caption(user, meals, total_cal, daily_goal, coach_mode=coach_mode)
         # Add workout summary to caption if any
         if workouts:
             burned = sum(w.get("calories_burned", 0) or 0 for w in workouts)
@@ -530,7 +564,7 @@ async def _send_summary_to_user(user: dict, meals: list):
         )
     except Exception as chart_err:
         logger.warning(f"Chart failed for {telegram_id}: {chart_err} — falling back to text")
-        message = await ai.generate_daily_summary(user, meals)
+        message = await ai.generate_daily_summary(user, meals, coach_mode=coach_mode)
         if message:
             await _bot_app.bot.send_message(chat_id=telegram_id, text=message)
 
@@ -585,7 +619,7 @@ async def send_meal_checkin(meal_type: str):
 
         try:
             memories = db.get_memories(tid, limit=10)
-            msg = await ai.generate_checkin_message(user, meal_type, memories)
+            msg = await ai.generate_checkin_message(user, meal_type, memories, coach_mode=user.get("coach_mode", "mentor"))
             await _bot_app.bot.send_message(chat_id=tid, text=msg)
             db.update_last_proactive_sent(tid)
             logger.info(f"[scheduler] Sent {meal_type} checkin to {tid}")
@@ -648,7 +682,7 @@ async def send_inactivity_checkin():
                 inactivity_trigger = "afternoon"
             else:
                 inactivity_trigger = "dinner"
-            msg = await ai.generate_checkin_message(user, inactivity_trigger, memories)
+            msg = await ai.generate_checkin_message(user, inactivity_trigger, memories, coach_mode=user.get("coach_mode", "mentor"))
             await _bot_app.bot.send_message(chat_id=tid, text=msg)
             db.update_last_proactive_sent(tid)
             logger.info(f"[scheduler] Sent inactivity checkin to {tid} ({hours_inactive:.1f}h inactive)")

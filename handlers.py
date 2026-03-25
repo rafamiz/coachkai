@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 import pytz
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 
 from telegram.ext import ContextTypes
 
@@ -337,9 +337,11 @@ async def cmd_perfil(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         f"Objetivo: {goal_map.get(user.get('goal', ''), user.get('goal', '?'))}\n"
 
-        f"Actividad: {activity_map.get(user.get('activity_level', ''), user.get('activity_level', '?'))}\n\n"
+        f"Actividad: {activity_map.get(user.get('activity_level', ''), user.get('activity_level', '?'))}\n"
 
-        "_Para modificar tu perfil us\u00e1 /reset_",
+        f"Coach mode: {'🤝 Mentor' if user.get('coach_mode', 'mentor') == 'mentor' else '🔥 Roaster'}\n\n"
+
+        "_Para modificar tu perfil usá /reset · Para cambiar el modo usá /coach_",
 
         parse_mode="Markdown",
 
@@ -401,7 +403,7 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         png_bytes = await charts_module.generate_daily_summary_chart(user, meals)
 
-        caption = await ai.generate_chart_caption(user, meals, total_cal, daily_goal)
+        caption = await ai.generate_chart_caption(user, meals, total_cal, daily_goal, coach_mode=user.get("coach_mode", "mentor"))
 
         await update.message.reply_photo(photo=png_bytes, caption=caption)
 
@@ -409,7 +411,7 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         logger.error(f"[resumen] Chart error for {telegram_id}: {e}")
 
-        message = await ai.generate_daily_summary(user, meals)
+        message = await ai.generate_daily_summary(user, meals, coach_mode=user.get("coach_mode", "mentor"))
 
         if message:
 
@@ -507,6 +509,47 @@ async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+
+
+def _coach_mode_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🤝 Mentor", callback_data="coach_mode:mentor"),
+            InlineKeyboardButton("🔥 Roaster", callback_data="coach_mode:roaster"),
+        ]
+    ])
+
+
+async def cmd_coach(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    user = db.get_user(telegram_id)
+    if not user or not user.get("onboarding_complete"):
+        await update.message.reply_text("Primero configurá tu perfil con /start 😊")
+        return
+    current = user.get("coach_mode", "mentor")
+    mode_label = "🤝 Mentor" if current == "mentor" else "🔥 Roaster"
+    await update.message.reply_text(
+        f"Tu modo de coach actual: *{mode_label}*\n\n"
+        "¿Querés cambiarlo?\n\n"
+        "🤝 *Mentor* — Te apoyo, celebro tus logros, te empujo con cariño\n"
+        "🔥 *Roaster* — Te digo las verdades sin filtro. Si la cagás, lo vas a saber.",
+        parse_mode="Markdown",
+        reply_markup=_coach_mode_keyboard(),
+    )
+
+
+async def handle_coach_callback(update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    telegram_id = query.from_user.id
+    data = query.data  # "coach_mode:mentor" or "coach_mode:roaster"
+    mode = data.split(":")[1] if ":" in data else "mentor"
+    db.upsert_user(telegram_id, coach_mode=mode)
+    label = "🤝 Mentor" if mode == "mentor" else "🔥 Roaster"
+    await query.edit_message_text(
+        f"¡Listo! Ahora tu coach es *{label}*.",
+        parse_mode="Markdown",
+    )
 
 
 async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -869,6 +912,18 @@ async def _handle_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             logger.error(f"[intake] dashboard URL send failed: {e}")
+
+        # Ask coach mode preference
+        try:
+            await update.message.reply_text(
+                "Último paso: ¿qué tipo de coach querés?\n\n"
+                "🤝 *Mentor* — Te apoyo, celebro tus logros, te empujo con cariño\n"
+                "🔥 *Roaster* — Te digo las verdades sin filtro. Si la cagás, lo vas a saber.",
+                parse_mode="Markdown",
+                reply_markup=_coach_mode_keyboard(),
+            )
+        except Exception as e:
+            logger.error(f"[intake] coach mode prompt failed: {e}")
     else:
         reply = result.get("reply") or "Cont\u00e1me un poco m\u00e1s."
         updated_history = (history + [
@@ -965,7 +1020,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"[nutrition] lookup error: {e}")
 
-    result = await ai.process_message(text + food_context, user, history[:-1])
+    result = await ai.process_message(text + food_context, user, history[:-1], coach_mode=user.get("coach_mode", "mentor"))
 
 
 
@@ -1311,7 +1366,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ai.reset_turn_cost()
 
-    result = await ai.process_message(caption, user, history[:-1], photo_path=photo_path)
+    result = await ai.process_message(caption, user, history[:-1], photo_path=photo_path, coach_mode=user.get("coach_mode", "mentor"))
 
 
 

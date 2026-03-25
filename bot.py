@@ -4,6 +4,7 @@ import os
 from aiohttp import web as aio_web
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
     filters,
@@ -66,6 +67,9 @@ def main():
     app.add_handler(CommandHandler("ayuda", handlers.cmd_ayuda))
     app.add_handler(CommandHandler("perfil", handlers.cmd_perfil))
     app.add_handler(CommandHandler("borrar", handlers.cmd_borrar))
+    app.add_handler(CommandHandler("limpiar", handlers.cmd_limpiar))
+    app.add_handler(CommandHandler("coach", handlers.cmd_coach))
+    app.add_handler(CallbackQueryHandler(handlers.handle_coach_callback, pattern="^coach_mode:"))
     app.add_handler(MessageHandler(filters.PHOTO, handlers.handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
     

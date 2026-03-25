@@ -176,6 +176,12 @@ def init_db():
         except Exception:
             conn.rollback()
 
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS coach_mode TEXT DEFAULT 'mentor'")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
                 id SERIAL PRIMARY KEY,
@@ -341,6 +347,11 @@ def init_db():
 
         try:
             c.execute("ALTER TABLE users ADD COLUMN last_proactive_sent TEXT")
+        except Exception:
+            pass
+
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN coach_mode TEXT DEFAULT 'mentor'")
         except Exception:
             pass
 
