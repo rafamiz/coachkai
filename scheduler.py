@@ -16,6 +16,32 @@ logger = logging.getLogger(__name__)
 
 _bot_app = None
 _scheduler = None
+_twilio_client = None
+_twilio_from = None
+
+
+def _is_active():
+    """Return True if at least one send channel is configured."""
+    return _bot_app is not None or _twilio_client is not None
+
+
+async def _send_to_tid(tid: int, message: str):
+    """Send a message to a user — Twilio if they have a phone, else Telegram."""
+    import asyncio
+    user = db.get_user(tid)
+    phone = user.get("phone") if user else None
+    if phone and _twilio_client:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: _twilio_client.messages.create(
+                from_=_twilio_from,
+                to=f"whatsapp:{phone}",
+                body=message,
+            ),
+        )
+    elif _bot_app:
+        await _bot_app.bot.send_message(chat_id=tid, text=message)
 
 MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"]
 
@@ -61,6 +87,30 @@ def start_scheduler(app):
     _scheduler.add_job(send_macro_nudge, "cron", hour=19, minute=0, id="macro_nudge")
     _scheduler.start()
     logger.info("Scheduler started")
+
+
+def start_scheduler_twilio(sid: str, token: str, from_number: str):
+    """Start the scheduler in Twilio-only mode (no Telegram bot required)."""
+    global _twilio_client, _twilio_from, _scheduler
+    if sid and token:
+        from twilio.rest import Client
+        _twilio_client = Client(sid, token)
+        _twilio_from = from_number
+    _scheduler = AsyncIOScheduler(timezone=ART)
+    _scheduler.add_job(check_proactive_messages, "interval", minutes=5,  id="proactive_check")
+    _scheduler.add_job(analyze_all_patterns,     "interval", hours=1,    id="pattern_analysis")
+    _scheduler.add_job(send_daily_summaries,     "cron",     hour=21, minute=0, id="daily_summary")
+    _scheduler.add_job(check_reminders,          "interval", minutes=1,  id="reminders_check")
+    _scheduler.add_job(check_meal_absence,       "interval", minutes=30, id="absence_check")
+    _scheduler.add_job(send_meal_checkin, "cron", hour=8,  minute=30, args=["breakfast"], id="breakfast_checkin")
+    _scheduler.add_job(send_meal_checkin, "cron", hour=13, minute=0,  args=["lunch"],     id="lunch_checkin")
+    _scheduler.add_job(send_meal_checkin, "cron", hour=17, minute=0,  args=["snack"],     id="snack_checkin")
+    _scheduler.add_job(send_meal_checkin, "cron", hour=20, minute=30, args=["dinner"],    id="dinner_checkin")
+    _scheduler.add_job(check_training_reminders, "interval", minutes=5, id="training_reminders")
+    _scheduler.add_job(send_inactivity_checkin,  "interval", hours=1,   id="inactivity_check")
+    _scheduler.add_job(send_macro_nudge, "cron", hour=19, minute=0, id="macro_nudge")
+    _scheduler.start()
+    logger.info("Scheduler started (Twilio mode)")
 
 
 def stop_scheduler():
@@ -253,7 +303,7 @@ async def _build_daily_goal(user: dict) -> int:
 # ---------------------------------------------------------------------------
 
 async def check_proactive_messages():
-    if _bot_app is None:
+    if not _is_active():
         return
 
     now     = datetime.now(ART)
@@ -360,7 +410,7 @@ async def _send_proactive(user, telegram_id, trigger, trigger_info,
             daily_goal=daily_goal,
             coach_mode=user.get("coach_mode", "mentor"),
         )
-        await _bot_app.bot.send_message(chat_id=telegram_id, text=message)
+        await _send_to_tid(telegram_id, message)
         db.add_followup(user["id"], message, ftype)
         db.update_last_proactive_sent(telegram_id)
         logger.info(f"[scheduler] Sent {ftype}/{label} to {telegram_id}")
@@ -374,15 +424,12 @@ async def _send_proactive(user, telegram_id, trigger, trigger_info,
 
 async def check_reminders():
     """Send any pending user-requested reminders."""
-    if _bot_app is None:
+    if not _is_active():
         return
     reminders = db.get_pending_reminders()
     for r in reminders:
         try:
-            await _bot_app.bot.send_message(
-                chat_id=r["telegram_id"],
-                text=f"\u23f0 {r['message']}"
-            )
+            await _send_to_tid(r["telegram_id"], f"\u23f0 {r['message']}")
             db.mark_reminder_sent(r["id"])
             logger.info(f"[scheduler] Sent reminder {r['id']} to {r['telegram_id']}")
         except Exception as e:
@@ -391,7 +438,7 @@ async def check_reminders():
 
 async def check_meal_absence():
     """Nudge users who have not logged a meal in 5+ hours during daytime."""
-    if _bot_app is None:
+    if not _is_active():
         return
     import pytz
     from datetime import datetime, timedelta
@@ -424,9 +471,9 @@ async def check_meal_absence():
                     if not await _can_send_proactive(tid):
                         logger.info(f"[scheduler] Cooldown active for {tid}, skipping absence nudge")
                         continue
-                    await _bot_app.bot.send_message(
-                        chat_id=tid,
-                        text=f"\u23f0 Pasaron {int(hours_since)}hs desde tu ultima comida registrada. Ya comiste algo? No te olvides de registrarlo."
+                    await _send_to_tid(
+                        tid,
+                        f"\u23f0 Pasaron {int(hours_since)}hs desde tu ultima comida registrada. Ya comiste algo? No te olvides de registrarlo.",
                     )
                     db.update_last_proactive_sent(tid)
                     db.add_followup(uid, f"absence_nudge_{now.hour}", "absence_nudge")
@@ -436,7 +483,7 @@ async def check_meal_absence():
 
 async def check_training_reminders():
     """Send pre-workout nutrition tip 30 min before scheduled training."""
-    if _bot_app is None:
+    if not _is_active():
         return
     import pytz
     from datetime import datetime
@@ -487,7 +534,7 @@ async def check_training_reminders():
                     f"Su objetivo es {goal}. Algo concreto: qu\u00e9 comer antes del gym. "
                     f"Tono: semiformal argentino, directo. Empez\u00e1 con '\u23f0 En 30 min ten\u00e9s el gym.'"}],
                     system=ai.SYSTEM_BASE + ai._get_personality(user.get("coach_mode", "mentor")))
-                await _bot_app.bot.send_message(chat_id=tid, text=tip)
+                await _send_to_tid(tid, tip)
                 db.update_last_proactive_sent(tid)
                 logger.info(f"[scheduler] Sent pre-workout reminder to {tid}")
             except Exception as e:

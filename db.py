@@ -182,6 +182,18 @@ def init_db():
         except Exception:
             conn.rollback()
 
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_step TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
                 id SERIAL PRIMARY KEY,
@@ -355,6 +367,16 @@ def init_db():
         except Exception:
             pass
 
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN phone TEXT")
+        except Exception:
+            pass
+
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN onboarding_step TEXT")
+        except Exception:
+            pass
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS followups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -513,6 +535,15 @@ def upsert_user(telegram_id: int, **kwargs):
             c.execute(_q(f"UPDATE users SET {sets} WHERE telegram_id = ?"), vals)
     conn.commit()
     _release(conn)
+
+
+def get_user_by_phone(phone: str):
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT * FROM users WHERE phone = ?"), (phone,))
+    row = c.fetchone()
+    _release(conn)
+    return dict(row) if row else None
 
 
 def get_user(telegram_id: int):
