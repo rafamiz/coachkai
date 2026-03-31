@@ -388,13 +388,34 @@ export default function OnboardingPage() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         console.error('Save failed:', err);
+        alert('Hubo un error guardando tus datos. Intentá de nuevo.');
+        setIsSubmitting(false);
+        return;
       }
 
-      // Redirect to dashboard regardless (demo-friendly)
-      window.location.href = '/dashboard';
+      const result = await res.json();
+
+      if (selectedPlan === 'free') {
+        // Free plan bypasses Stripe entirely — show success screen
+        setStepId('success' as StepId);
+      } else {
+        // Paid plans → Stripe checkout
+        const checkoutRes = await fetch('/api/checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: result.user_id, plan: selectedPlan }),
+        });
+        if (!checkoutRes.ok) {
+          alert('Error iniciando el pago. Intentá de nuevo.');
+          setIsSubmitting(false);
+          return;
+        }
+        const { url } = await checkoutRes.json();
+        window.location.href = url;
+      }
     } catch (err) {
       console.error(err);
-      window.location.href = '/dashboard';
+      alert('Error de conexión. Intentá de nuevo.');
     } finally {
       setIsSubmitting(false);
     }
@@ -1112,7 +1133,19 @@ export default function OnboardingPage() {
       }
 
       default:
-        return null;
+        // Success screen after free plan signup
+        return (
+          <div className="flex flex-col items-center justify-center flex-1 gap-6 px-6 text-center">
+            <div className="text-6xl">🎉</div>
+            <h2 className="text-2xl font-extrabold text-white">¡Todo listo!</h2>
+            <p className="text-gray-400 leading-relaxed max-w-xs">
+              Tu cuenta está creada. Volvé a WhatsApp y mandame un mensaje para empezar a usar tu coach nutricional.
+            </p>
+            <div className="p-4 rounded-2xl border border-gray-700 bg-gray-800/50 w-full max-w-xs">
+              <p className="text-sm text-gray-300">📱 Mandá cualquier mensaje al bot por WhatsApp y te respondo al toque</p>
+            </div>
+          </div>
+        );
     }
   };
 
