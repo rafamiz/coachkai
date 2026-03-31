@@ -40,18 +40,26 @@ function calcDailyCal(tdee: number, goal: Goal, weeklyKg?: number): number {
   return Math.min(calories, 4500);
 }
 
-function calcMacros(cal: number, goal: Goal) {
-  const ratios: Record<Goal, [number, number, number]> = {
-    lose_weight: [0.4, 0.3, 0.3],
-    gain_muscle: [0.35, 0.4, 0.25],
-    maintain: [0.3, 0.4, 0.3],
-    eat_healthier: [0.3, 0.4, 0.3],
+function calcMacros(cal: number, goal: Goal, weightKg: number) {
+  // Protein based on g/kg body weight (not % of calories)
+  const proteinPerKg: Record<Goal, number> = {
+    lose_weight: 2.0,
+    gain_muscle: 2.2,
+    maintain: 1.6,
+    eat_healthier: 1.6,
   };
-  const [p, c, f] = ratios[goal];
+  const protein_g = Math.round(weightKg * proteinPerKg[goal]);
+  const proteinCals = protein_g * 4;
+  const remaining = Math.max(0, cal - proteinCals);
+  // Split remaining between carbs and fat
+  const carbRatio: Record<Goal, number> = {
+    lose_weight: 0.55, gain_muscle: 0.65, maintain: 0.6, eat_healthier: 0.6,
+  };
+  const cr = carbRatio[goal];
   return {
-    protein_g: Math.round((cal * p) / 4),
-    carbs_g: Math.round((cal * c) / 4),
-    fat_g: Math.round((cal * f) / 9),
+    protein_g,
+    carbs_g: Math.round((remaining * cr) / 4),
+    fat_g: Math.round((remaining * (1 - cr)) / 9),
   };
 }
 
@@ -106,7 +114,7 @@ export async function POST(req: NextRequest) {
   const age = calcAge(date_of_birth);
   const tdee = calcTDEE(gender, weight_kg, height_cm, age, activity_level);
   const dailyCal = calcDailyCal(tdee, goal, weekly_goal_kg);
-  const macros = calcMacros(dailyCal, goal);
+  const macros = calcMacros(dailyCal, goal, weight_kg);
 
   const userData = {
     phone: (body.phone as string) || `web_${Date.now()}`,
