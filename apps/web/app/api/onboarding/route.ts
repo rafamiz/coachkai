@@ -146,7 +146,8 @@ export async function POST(req: NextRequest) {
   }
 
   const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-  await getServiceClient()
+  const sb = getServiceClient();
+  await sb
     .from('subscriptions')
     .insert({
       user_id: user.id,
@@ -154,6 +155,15 @@ export async function POST(req: NextRequest) {
       status: plan && plan !== 'free' ? 'trialing' : 'active',
       trial_ends_at: plan && plan !== 'free' ? trialEndsAt : null,
     });
+
+  // Create default reminders for new user
+  const defaultReminders = [
+    { user_id: user.id, type: 'meal', label: 'desayuno', remind_at_utc: '11:00', days_of_week: [0,1,2,3,4,5,6], enabled: true },
+    { user_id: user.id, type: 'meal', label: 'almuerzo', remind_at_utc: '16:00', days_of_week: [0,1,2,3,4,5,6], enabled: true },
+    { user_id: user.id, type: 'meal', label: 'cena', remind_at_utc: '23:00', days_of_week: [0,1,2,3,4,5,6], enabled: true },
+    { user_id: user.id, type: 'water', label: 'agua', remind_at_utc: '18:00', days_of_week: [0,1,2,3,4,5,6], enabled: true },
+  ];
+  await sb.from('reminders').insert(defaultReminders);
 
   return NextResponse.json({
     user_id: user.id,

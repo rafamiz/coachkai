@@ -12,10 +12,10 @@ export async function GET(req: NextRequest) {
   const provider = getWhatsAppProvider();
 
   const messages: Record<string, string> = {
-    meal: "Hey {{name}}! \u{1F37D}\u{FE0F} Time for your {{label}}. Send me a photo when you eat!",
-    water: "Hey {{name}}! \u{1F4A7} Don't forget to drink some water. How many ml/glasses have you had?",
-    weigh_in: "Hey {{name}}! \u{2696}\u{FE0F} Time for your weekly weigh-in. Just tell me your current weight!",
-    custom: "Hey {{name}}! \u{1F514} Reminder: {{label}}",
+    meal: "🍽️ ¡{{name}}, hora de comer! Mandame una foto de tu {{label}} y te digo los macros al toque 💪",
+    water: "💧 ¡{{name}}! ¿Ya tomaste agua? Acordate de hidratarte. Decime cuántos vasos llevás hoy",
+    weigh_in: "⚖️ ¡{{name}}, hora de pesarte! Mandame tu peso de hoy así lo registro",
+    custom: "🔔 {{name}}: {{label}}",
   };
 
   let sent = 0;
