@@ -2,12 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import twilio from 'twilio';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://nutricoach-one.vercel.app';
 
 function twiml(message: string): NextResponse {
@@ -19,6 +13,12 @@ function twiml(message: string): NextResponse {
 }
 
 export async function POST(req: NextRequest) {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
+
   try {
     // Parse form-encoded body from Twilio
     const text = await req.text();
