@@ -2,7 +2,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Form
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from twilio.twiml.messaging_response import MessagingResponse
 import uvicorn
 
@@ -26,6 +26,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/onboarding", response_class=HTMLResponse)
+def onboarding():
+    with open("onboarding.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
 
 
 @app.get("/health")

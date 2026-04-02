@@ -107,12 +107,22 @@ async def handle_message(numero: str, text: str, media_url: str = None) -> str:
 # ------------------------------------------------------------------
 
 async def _handle_onboarding(user: dict, tid: int, step, text: str) -> str:
-    # Brand-new user — send welcome
+    # Brand-new user — send webapp link
     if step is None:
-        db.upsert_user(tid, onboarding_step="awaiting_name")
+        db.upsert_user(tid, onboarding_step="awaiting_webapp")
         return (
-            "Hola! Soy NutriBot, tu coach de nutricion personal por WhatsApp.\n\n"
-            "Como te llamas?"
+            "Hola! Soy CoachKai, tu coach de nutrición personal 🤖\n\n"
+            "Para empezar, completá tu perfil en 2 minutos:\n"
+            "👉 https://coachkai-production.up.railway.app/onboarding\n\n"
+            "Ahí elegís tu objetivo, tus datos y el tipo de coach que querés.\n"
+            "Al final te cuento cómo funciona todo 💪"
+        )
+
+    # Sent webapp link, waiting for them to complete it
+    if step == "awaiting_webapp":
+        return (
+            "Todavía no completaste tu perfil. Entrá acá y listo:\n"
+            "👉 https://coachkai-production.up.railway.app/onboarding"
         )
 
     if step == "awaiting_name":

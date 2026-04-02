@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CoachKai — Tu Coach de Nutrición</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0a0a0f;
+  --card: #13131f;
+  --card-border: #2a2a40;
+  --primary: #6366f1;
+  --accent: #a855f7;
+  --text: #ffffff;
+  --text-muted: #94a3b8;
+  --success: #22c55e;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Progress bar */
+.progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  transition: width 0.4s ease;
+  z-index: 100;
+}
+
+/* Slides container */
+.slides {
+  display: flex;
+  height: 100%;
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.slide {
+  min-width: 100vw;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem;
+  overflow-y: auto;
+}
+
+/* Typography */
+h1 { font-size: 1.75rem; font-weight: 800; line-height: 1.2; text-align: center; }
+h2 { font-size: 1.5rem; font-weight: 700; line-height: 1.3; text-align: center; margin-bottom: 0.5rem; }
+.subtitle { color: var(--text-muted); text-align: center; font-size: 0.95rem; line-height: 1.5; margin-top: 0.75rem; max-width: 320px; }
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 340px;
+  padding: 1rem 1.5rem;
+  border: none;
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s, opacity 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active { transform: scale(0.97); }
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: white;
+  box-shadow: 0 4px 24px rgba(99,102,241,0.35);
+}
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-secondary {
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.75rem;
+}
+
+/* Cards */
+.card {
+  background: var(--card);
+  border: 2px solid var(--card-border);
+  border-radius: 16px;
+  padding: 1.25rem;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  width: 100%;
+  max-width: 340px;
+}
+.card:active { transform: scale(0.98); }
+.card.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 20px rgba(99,102,241,0.3);
+  transform: scale(1.02);
+}
+.card-emoji { font-size: 1.75rem; margin-bottom: 0.5rem; }
+.card-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 0.25rem; }
+.card-desc { color: var(--text-muted); font-size: 0.85rem; line-height: 1.4; }
+.card-tag {
+  display: inline-block;
+  margin-top: 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  background: rgba(168,85,247,0.12);
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+}
+
+.cards-stack { display: flex; flex-direction: column; gap: 0.75rem; width: 100%; max-width: 340px; }
+.cards-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; width: 100%; max-width: 380px; }
+
+/* Inputs */
+input[type="text"], input[type="number"] {
+  background: var(--card);
+  border: 2px solid var(--card-border);
+  border-radius: 14px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 1.2rem;
+  font-weight: 600;
+  padding: 1rem 1.25rem;
+  width: 100%;
+  max-width: 340px;
+  outline: none;
+  transition: border-color 0.2s;
+  -webkit-appearance: none;
+}
+input:focus { border-color: var(--primary); }
+input::placeholder { color: #4a4a6a; }
+
+.input-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 340px;
+}
+.input-group input {
+  max-width: none;
+  font-size: 1.05rem;
+  padding: 0.9rem 0.7rem;
+  text-align: center;
+}
+.input-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 0.3rem;
+}
+
+/* Social proof */
+.social-proof {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-top: 1rem;
+  text-align: center;
+}
+
+/* Slide 1 gradient bg */
+.slide-hook {
+  background: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.15) 0%, transparent 60%),
+              radial-gradient(ellipse at 50% 100%, rgba(168,85,247,0.1) 0%, transparent 50%),
+              var(--bg);
+}
+.logo { font-size: 1.1rem; font-weight: 700; color: var(--text-muted); margin-bottom: 2rem; letter-spacing: 0.02em; }
+
+/* Results card */
+.results-card {
+  background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(168,85,247,0.08));
+  border: 1px solid rgba(99,102,241,0.25);
+  border-radius: 20px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+}
+.results-cal { font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, var(--primary), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.results-cal-label { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem; }
+.results-macros { display: flex; justify-content: center; gap: 1.25rem; margin-top: 1rem; }
+.results-macro { text-align: center; }
+.results-macro-val { font-size: 1.3rem; font-weight: 700; }
+.results-macro-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* Feature list */
+.features { width: 100%; max-width: 340px; margin-top: 1.25rem; }
+.feature {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0;
+  font-size: 0.9rem;
+}
+.feature-check { color: var(--success); font-weight: 700; font-size: 1rem; flex-shrink: 0; }
+
+/* Paywall */
+.price-card {
+  background: var(--card);
+  border: 2px solid var(--card-border);
+  border-radius: 20px;
+  padding: 1.75rem;
+  text-align: center;
+  width: 100%;
+  max-width: 340px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.3);
+}
+.price-old { color: var(--text-muted); text-decoration: line-through; font-size: 1rem; }
+.price-new { font-size: 2.5rem; font-weight: 800; margin: 0.25rem 0; }
+.price-period { color: var(--text-muted); font-size: 0.85rem; }
+.price-cancel { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.5rem; }
+.urgency {
+  font-size: 0.78rem;
+  color: var(--accent);
+  margin-top: 1rem;
+  text-align: center;
+  max-width: 300px;
+}
+.stars { color: #facc15; font-size: 0.9rem; letter-spacing: 2px; }
+
+/* Loading animation */
+.loader {
+  width: 60px;
+  height: 60px;
+  border: 3px solid var(--card-border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 1.5rem;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  text-align: center;
+  transition: opacity 0.3s;
+  min-height: 1.5em;
+}
+
+/* Spacer helpers */
+.gap-sm { height: 0.75rem; }
+.gap-md { height: 1.25rem; }
+.gap-lg { height: 1.75rem; }
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progressBar" style="width: 0%"></div>
+
+<div class="slides" id="slides">
+
+  <!-- Slide 1: Hook -->
+  <div class="slide slide-hook">
+    <div class="logo">CoachKai 🤖</div>
+    <h1>Tu coach de nutrición personal por WhatsApp</h1>
+    <p class="subtitle">Foto de tu comida → 10 segundos → calorías, proteínas, y qué comer en tu próxima comida</p>
+    <div class="gap-lg"></div>
+    <button class="btn btn-primary" onclick="goTo(1)">Empezar gratis →</button>
+    <p class="social-proof">12,847 personas ya cumpliendo sus metas</p>
+  </div>
+
+  <!-- Slide 2: Name -->
+  <div class="slide">
+    <h2>¿Cómo te llamamos?</h2>
+    <div class="gap-md"></div>
+    <input type="text" id="nameInput" placeholder="Tu nombre" autocomplete="given-name" enterkeyhint="next">
+    <div class="gap-md"></div>
+    <button class="btn btn-primary" id="nameBtn" disabled onclick="saveName()">Continuar →</button>
+  </div>
+
+  <!-- Slide 3: Goal -->
+  <div class="slide">
+    <h2 id="goalTitle">¿Cuál es tu objetivo principal?</h2>
+    <div class="gap-md"></div>
+    <div class="cards-stack" id="goalCards">
+      <div class="card" onclick="pickGoal(this,'lose')">
+        <div class="card-emoji">🔥</div>
+        <div class="card-title">Bajar de peso</div>
+      </div>
+      <div class="card" onclick="pickGoal(this,'gain')">
+        <div class="card-emoji">💪</div>
+        <div class="card-title">Ganar músculo</div>
+      </div>
+      <div class="card" onclick="pickGoal(this,'maintain')">
+        <div class="card-emoji">⚖️</div>
+        <div class="card-title">Mantenerme</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 4: Activity -->
+  <div class="slide">
+    <h2>¿Cuánto te movés?</h2>
+    <div class="gap-md"></div>
+    <div class="cards-stack" id="activityCards">
+      <div class="card" onclick="pickActivity(this,'sedentary')">
+        <div class="card-emoji">🛋️</div>
+        <div class="card-title">Poco</div>
+        <div class="card-desc">Trabajo sentado, sin ejercicio</div>
+      </div>
+      <div class="card" onclick="pickActivity(this,'lightly')">
+        <div class="card-emoji">🚶</div>
+        <div class="card-title">Algo</div>
+        <div class="card-desc">1-3 días por semana</div>
+      </div>
+      <div class="card" onclick="pickActivity(this,'active')">
+        <div class="card-emoji">🏃</div>
+        <div class="card-title">Bastante</div>
+        <div class="card-desc">4-5 días por semana</div>
+      </div>
+      <div class="card" onclick="pickActivity(this,'very')">
+        <div class="card-emoji">🏋️</div>
+        <div class="card-title">Mucho</div>
+        <div class="card-desc">Entreno intenso 6-7 días</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 5: Body stats -->
+  <div class="slide">
+    <h2 id="statsTitle">Necesitamos tus datos para calcular tu plan exacto</h2>
+    <div class="gap-md"></div>
+    <div class="input-group">
+      <div>
+        <div class="input-label">Edad</div>
+        <input type="number" id="ageInput" placeholder="28" inputmode="numeric" min="10" max="99">
+      </div>
+      <div>
+        <div class="input-label">Peso (kg)</div>
+        <input type="number" id="weightInput" placeholder="75" inputmode="decimal" min="30" max="300">
+      </div>
+      <div>
+        <div class="input-label">Altura (cm)</div>
+        <input type="number" id="heightInput" placeholder="175" inputmode="numeric" min="100" max="250">
+      </div>
+    </div>
+    <div class="gap-md"></div>
+    <button class="btn btn-primary" id="statsBtn" disabled onclick="saveStats()">Continuar →</button>
+  </div>
+
+  <!-- Slide 6: Coach identity -->
+  <div class="slide">
+    <h2>Elegí tu coach</h2>
+    <div class="gap-md"></div>
+    <div class="cards-row" id="coachCards">
+      <div class="card" onclick="pickCoach(this,'mentor')">
+        <div class="card-emoji">🤝</div>
+        <div class="card-title">El Mentor</div>
+        <div class="card-desc">Te celebro cada logro. Te guío con empatía cuando te equivocás. Estoy para bancarte.</div>
+        <div class="card-tag">Popular entre principiantes</div>
+      </div>
+      <div class="card" onclick="pickCoach(this,'challenger')">
+        <div class="card-emoji">🔥</div>
+        <div class="card-title">El Challenger</div>
+        <div class="card-desc">Sin filtros. Si la cagás, lo vas a saber. Resultados reales requieren verdades reales.</div>
+        <div class="card-tag">Para los que van en serio</div>
+      </div>
+    </div>
+    <div class="gap-md"></div>
+    <button class="btn btn-primary" id="coachBtn" disabled onclick="goTo(6)">Este es mi coach →</button>
+  </div>
+
+  <!-- Slide 7: Loading -->
+  <div class="slide">
+    <div class="loader"></div>
+    <div class="loading-text" id="loadingText">Calculando tu metabolismo basal...</div>
+  </div>
+
+  <!-- Slide 8: Results -->
+  <div class="slide">
+    <div class="results-card">
+      <div class="results-cal-label">Tu objetivo calórico</div>
+      <div class="results-cal" id="resultCal">—</div>
+      <div class="results-cal-label">kcal/día</div>
+      <div class="results-macros">
+        <div class="results-macro">
+          <div class="results-macro-val" id="resultProt">—</div>
+          <div class="results-macro-label">Proteínas</div>
+        </div>
+        <div class="results-macro">
+          <div class="results-macro-val" id="resultCarbs">—</div>
+          <div class="results-macro-label">Carbos</div>
+        </div>
+        <div class="results-macro">
+          <div class="results-macro-val" id="resultFat">—</div>
+          <div class="results-macro-label">Grasas</div>
+        </div>
+      </div>
+    </div>
+    <div class="features">
+      <div class="feature"><span class="feature-check">✓</span> Análisis de fotos de comida en segundos</div>
+      <div class="feature"><span class="feature-check">✓</span> Coach personal por WhatsApp 24/7</div>
+      <div class="feature"><span class="feature-check">✓</span> Resumen diario automático</div>
+      <div class="feature"><span class="feature-check">✓</span> Plan de comidas semanal</div>
+      <div class="feature"><span class="feature-check">✓</span> Recordatorios inteligentes</div>
+    </div>
+    <div class="gap-md"></div>
+    <button class="btn btn-primary" onclick="goTo(8)">Ver mi plan completo →</button>
+  </div>
+
+  <!-- Slide 9: Paywall -->
+  <div class="slide">
+    <h2 id="paywallTitle">Tu plan está listo 🎉</h2>
+    <div class="gap-md"></div>
+    <div class="price-card">
+      <div class="price-old">$15 USD/mes</div>
+      <div class="price-new">$9 <span style="font-size:1rem;font-weight:500;color:var(--text-muted)">/mes</span></div>
+      <div class="price-cancel">Cancelá cuando quieras</div>
+    </div>
+    <div class="urgency">Precio de lanzamiento — disponible para los primeros 500 usuarios</div>
+    <div class="gap-md"></div>
+    <a class="btn btn-primary" id="ctaLink" href="https://wa.me/14155238886?text=Hola!%20Quiero%20empezar%20con%20CoachKai" target="_blank" rel="noopener">Empezar ahora →</a>
+    <a class="btn btn-secondary" href="https://wa.me/14155238886?text=Hola!%20Quiero%20probar%207%20d%C3%ADas%20gratis%20de%20CoachKai" target="_blank" rel="noopener">O probá 7 días gratis →</a>
+    <div class="gap-sm"></div>
+    <div class="stars">★★★★★</div>
+    <p class="social-proof" style="margin-top:0.4rem">Los usuarios pierden en promedio 2.3kg en su primer mes</p>
+  </div>
+
+</div>
+
+<script>
+let current = 0;
+const totalSlides = 9;
+const data = { name: '', goal: '', activity: '', age: 0, weight: 0, height: 0, coach: '' };
+
+function goTo(i) {
+  current = i;
+  document.getElementById('slides').style.transform = 'translateX(-' + (i * 100) + 'vw)';
+  document.getElementById('progressBar').style.width = ((i / (totalSlides - 1)) * 100) + '%';
+
+  // Auto-focus name input
+  if (i === 1) setTimeout(() => document.getElementById('nameInput').focus(), 400);
+
+  // Start loading animation
+  if (i === 6) startLoading();
+}
+
+// Slide 2: Name
+const nameInput = document.getElementById('nameInput');
+const nameBtn = document.getElementById('nameBtn');
+nameInput.addEventListener('input', () => {
+  nameBtn.disabled = nameInput.value.trim().length === 0;
+});
+nameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && nameInput.value.trim()) saveName();
+});
+function saveName() {
+  data.name = nameInput.value.trim();
+  document.getElementById('goalTitle').textContent = data.name + ', ¿cuál es tu objetivo principal?';
+  document.getElementById('statsTitle').textContent = data.name + ', necesitamos tus datos para calcular tu plan exacto';
+  document.getElementById('paywallTitle').textContent = data.name + ', tu plan está listo 🎉';
+  goTo(2);
+}
+
+// Slide 3: Goal
+function pickGoal(el, goal) {
+  data.goal = goal;
+  document.querySelectorAll('#goalCards .card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  setTimeout(() => goTo(3), 250);
+}
+
+// Slide 4: Activity
+function pickActivity(el, level) {
+  data.activity = level;
+  document.querySelectorAll('#activityCards .card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  setTimeout(() => goTo(4), 250);
+}
+
+// Slide 5: Stats
+const statsInputs = [document.getElementById('ageInput'), document.getElementById('weightInput'), document.getElementById('heightInput')];
+statsInputs.forEach(inp => {
+  inp.addEventListener('input', () => {
+    document.getElementById('statsBtn').disabled = !statsInputs.every(i => i.value && Number(i.value) > 0);
+  });
+});
+function saveStats() {
+  data.age = Number(document.getElementById('ageInput').value);
+  data.weight = Number(document.getElementById('weightInput').value);
+  data.height = Number(document.getElementById('heightInput').value);
+  goTo(5);
+}
+
+// Slide 6: Coach
+function pickCoach(el, coach) {
+  data.coach = coach;
+  document.querySelectorAll('#coachCards .card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('coachBtn').disabled = false;
+}
+
+// Slide 7: Loading
+function startLoading() {
+  const texts = [
+    'Calculando tu metabolismo basal...',
+    'Ajustando para tu nivel de actividad...',
+    'Generando tu plan personalizado...'
+  ];
+  const el = document.getElementById('loadingText');
+  let i = 0;
+  el.textContent = texts[0];
+  const iv = setInterval(() => {
+    i++;
+    if (i < texts.length) {
+      el.style.opacity = 0;
+      setTimeout(() => { el.textContent = texts[i]; el.style.opacity = 1; }, 200);
+    }
+  }, 800);
+  setTimeout(() => {
+    clearInterval(iv);
+    showResults();
+    goTo(7);
+  }, 2500);
+}
+
+// Calculations
+function calcCalories(age, weight, height, goal, activity) {
+  let bmr = 10 * weight + 6.25 * height - 5 * age + 5;
+  const mult = { sedentary: 1.2, lightly: 1.375, active: 1.55, very: 1.725 };
+  let tdee = bmr * (mult[activity] || 1.375);
+  if (goal === 'lose') tdee -= 400;
+  if (goal === 'gain') tdee += 300;
+  return Math.round(tdee);
+}
+
+function showResults() {
+  const cal = calcCalories(data.age, data.weight, data.height, data.goal, data.activity);
+  const protein = Math.round(data.weight * (data.goal === 'gain' ? 2.0 : 1.8));
+  const fat = Math.round(cal * 0.25 / 9);
+  const carbs = Math.round((cal - protein * 4 - fat * 9) / 4);
+
+  document.getElementById('resultCal').textContent = cal.toLocaleString('es');
+  document.getElementById('resultProt').textContent = protein + 'g';
+  document.getElementById('resultCarbs').textContent = carbs + 'g';
+  document.getElementById('resultFat').textContent = fat + 'g';
+}
+</script>
+</body>
+</html>
