@@ -223,26 +223,85 @@ input::placeholder { color: #4a4a6a; }
 .feature-check { color: var(--success); font-weight: 700; font-size: 1rem; flex-shrink: 0; }
 
 /* Paywall */
-.price-card {
+.trial-headline {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--success);
+  text-align: center;
+  margin-bottom: 0.25rem;
+}
+.trial-sub {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+.plans-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 380px;
+}
+.plan-card {
   background: var(--card);
   border: 2px solid var(--card-border);
-  border-radius: 20px;
-  padding: 1.75rem;
+  border-radius: 16px;
+  padding: 1.25rem 1rem;
   text-align: center;
-  width: 100%;
-  max-width: 340px;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.3);
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
 }
-.price-old { color: var(--text-muted); text-decoration: line-through; font-size: 1rem; }
-.price-new { font-size: 2.5rem; font-weight: 800; margin: 0.25rem 0; }
-.price-period { color: var(--text-muted); font-size: 0.85rem; }
-.price-cancel { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.5rem; }
-.urgency {
-  font-size: 0.78rem;
-  color: var(--accent);
-  margin-top: 1rem;
+.plan-card:active { transform: scale(0.98); }
+.plan-card.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 20px rgba(99,102,241,0.3);
+  transform: scale(1.02);
+}
+.plan-card.featured {
+  border-color: var(--accent);
+  box-shadow: 0 0 24px rgba(168,85,247,0.25);
+}
+.plan-card.featured.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 30px rgba(168,85,247,0.4);
+}
+.plan-badge {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: white;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.plan-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 0.5rem; }
+.plan-old { color: var(--text-muted); text-decoration: line-through; font-size: 0.85rem; }
+.plan-price { font-size: 1.75rem; font-weight: 800; margin: 0.15rem 0; }
+.plan-price span { font-size: 0.85rem; font-weight: 500; color: var(--text-muted); }
+.plan-equiv { font-size: 0.78rem; color: var(--accent); font-weight: 600; margin-top: 0.1rem; }
+.plan-note { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.4rem; }
+.plan-save {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--success);
+  background: rgba(34,197,94,0.12);
+  padding: 0.2rem 0.5rem;
+  border-radius: 5px;
+}
+.paywall-trust {
+  font-size: 0.8rem;
+  color: var(--text-muted);
   text-align: center;
-  max-width: 300px;
 }
 .stars { color: #facc15; font-size: 0.9rem; letter-spacing: 2px; }
 
@@ -429,19 +488,33 @@ input::placeholder { color: #4a4a6a; }
   <!-- Slide 9: Paywall -->
   <div class="slide">
     <h2 id="paywallTitle">Tu plan está listo 🎉</h2>
+    <div class="gap-sm"></div>
+    <div class="trial-headline">Empezá con 7 días gratis — sin cargo</div>
+    <div class="trial-sub">Elegí tu plan. El cobro empieza después de la prueba.</div>
     <div class="gap-md"></div>
-    <div class="price-card">
-      <div class="price-old">$15 USD/mes</div>
-      <div class="price-new">$9 <span style="font-size:1rem;font-weight:500;color:var(--text-muted)">/mes</span></div>
-      <div class="price-cancel">Cancelá cuando quieras</div>
+    <div class="plans-row">
+      <div class="plan-card" id="planMonthly" onclick="pickPlan('monthly')">
+        <div class="plan-name">Plan Mensual</div>
+        <div class="plan-old"><s>$15 USD</s></div>
+        <div class="plan-price">$9 <span>/mes</span></div>
+        <div class="plan-note">Cancelá cuando quieras</div>
+      </div>
+      <div class="plan-card featured selected" id="planAnnual" onclick="pickPlan('annual')">
+        <div class="plan-badge">MÁS POPULAR</div>
+        <div class="plan-name">Plan Anual</div>
+        <div class="plan-old"><s>$108 USD</s></div>
+        <div class="plan-price">$59 <span>/año</span></div>
+        <div class="plan-equiv">= $4.90/mes</div>
+        <div class="plan-save">Ahorrás 45%</div>
+      </div>
     </div>
-    <div class="urgency">Precio de lanzamiento — disponible para los primeros 500 usuarios</div>
     <div class="gap-md"></div>
-    <a class="btn btn-primary" id="ctaLink" href="https://wa.me/14155238886?text=Hola!%20Quiero%20empezar%20con%20CoachKai" target="_blank" rel="noopener">Empezar ahora →</a>
-    <a class="btn btn-secondary" href="https://wa.me/14155238886?text=Hola!%20Quiero%20probar%207%20d%C3%ADas%20gratis%20de%20CoachKai" target="_blank" rel="noopener">O probá 7 días gratis →</a>
+    <a class="btn btn-primary" id="ctaLink" href="https://wa.me/14155238886?text=Hola!%20Quiero%20el%20plan%20anual%20de%20CoachKai" target="_blank" rel="noopener">Empezar prueba gratuita →</a>
+    <div class="gap-sm"></div>
+    <div class="paywall-trust">🔒 Pago seguro — cancelá en cualquier momento</div>
     <div class="gap-sm"></div>
     <div class="stars">★★★★★</div>
-    <p class="social-proof" style="margin-top:0.4rem">Los usuarios pierden en promedio 2.3kg en su primer mes</p>
+    <p class="social-proof" style="margin-top:0.4rem">12,847 usuarios activos</p>
   </div>
 
 </div>
@@ -550,6 +623,18 @@ function calcCalories(age, weight, height, goal, activity) {
   if (goal === 'lose') tdee -= 400;
   if (goal === 'gain') tdee += 300;
   return Math.round(tdee);
+}
+
+// Slide 9: Plan selection
+let selectedPlan = 'annual';
+function pickPlan(plan) {
+  selectedPlan = plan;
+  document.getElementById('planMonthly').classList.toggle('selected', plan === 'monthly');
+  document.getElementById('planAnnual').classList.toggle('selected', plan === 'annual');
+  const link = plan === 'monthly'
+    ? 'https://wa.me/14155238886?text=Hola!%20Quiero%20el%20plan%20mensual%20de%20CoachKai'
+    : 'https://wa.me/14155238886?text=Hola!%20Quiero%20el%20plan%20anual%20de%20CoachKai';
+  document.getElementById('ctaLink').href = link;
 }
 
 function showResults() {
