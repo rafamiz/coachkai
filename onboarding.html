@@ -137,7 +137,7 @@ h2 { font-size: 1.5rem; font-weight: 700; line-height: 1.3; text-align: center; 
 .cards-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; width: 100%; max-width: 380px; }
 
 /* Inputs */
-input[type="text"], input[type="number"] {
+input[type="text"], input[type="number"], input[type="tel"] {
   background: var(--card);
   border: 2px solid var(--card-border);
   border-radius: 14px;
@@ -485,7 +485,17 @@ input::placeholder { color: #4a4a6a; }
     <button class="btn btn-primary" onclick="goTo(8)">Ver mi plan completo →</button>
   </div>
 
-  <!-- Slide 9: Paywall -->
+  <!-- Slide 9: Phone -->
+  <div class="slide">
+    <h2>Tu número de WhatsApp</h2>
+    <p class="subtitle">Para enviarte tu plan personalizado por WhatsApp</p>
+    <div class="gap-md"></div>
+    <input type="tel" id="phoneInput" placeholder="+54 11 1234-5678" autocomplete="tel">
+    <div class="gap-md"></div>
+    <button class="btn btn-primary" id="phoneBtn" disabled onclick="savePhone()">Continuar →</button>
+  </div>
+
+  <!-- Slide 10: Paywall -->
   <div class="slide">
     <h2 id="paywallTitle">Tu plan está listo 🎉</h2>
     <div class="gap-sm"></div>
@@ -509,7 +519,7 @@ input::placeholder { color: #4a4a6a; }
       </div>
     </div>
     <div class="gap-md"></div>
-    <a class="btn btn-primary" id="ctaLink" href="https://wa.me/14155238886?text=Hola!%20Quiero%20el%20plan%20anual%20de%20CoachKai" target="_blank" rel="noopener">Empezar prueba gratuita →</a>
+    <button class="btn btn-primary" id="ctaBtn" onclick="completeOnboarding()">Empezar prueba gratuita →</button>
     <div class="gap-sm"></div>
     <div class="paywall-trust">🔒 Pago seguro — cancelá en cualquier momento</div>
     <div class="gap-sm"></div>
@@ -521,16 +531,17 @@ input::placeholder { color: #4a4a6a; }
 
 <script>
 let current = 0;
-const totalSlides = 9;
-const data = { name: '', goal: '', activity: '', age: 0, weight: 0, height: 0, coach: '' };
+const totalSlides = 10;
+const data = { name: '', goal: '', activity: '', age: 0, weight: 0, height: 0, coach: '', phone: '' };
 
 function goTo(i) {
   current = i;
   document.getElementById('slides').style.transform = 'translateX(-' + (i * 100) + 'vw)';
   document.getElementById('progressBar').style.width = ((i / (totalSlides - 1)) * 100) + '%';
 
-  // Auto-focus name input
+  // Auto-focus inputs
   if (i === 1) setTimeout(() => document.getElementById('nameInput').focus(), 400);
+  if (i === 8) setTimeout(() => document.getElementById('phoneInput').focus(), 400);
 
   // Start loading animation
   if (i === 6) startLoading();
@@ -625,16 +636,51 @@ function calcCalories(age, weight, height, goal, activity) {
   return Math.round(tdee);
 }
 
-// Slide 9: Plan selection
+// Slide 9: Phone
+const phoneInput = document.getElementById('phoneInput');
+const phoneBtn = document.getElementById('phoneBtn');
+phoneInput.addEventListener('input', () => {
+  phoneBtn.disabled = phoneInput.value.replace(/[\s\-\+\(\)]/g, '').length < 6;
+});
+phoneInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !phoneBtn.disabled) savePhone();
+});
+function savePhone() {
+  data.phone = phoneInput.value.trim();
+  goTo(9);
+}
+
+// Slide 10: Plan selection
 let selectedPlan = 'annual';
 function pickPlan(plan) {
   selectedPlan = plan;
   document.getElementById('planMonthly').classList.toggle('selected', plan === 'monthly');
   document.getElementById('planAnnual').classList.toggle('selected', plan === 'annual');
-  const link = plan === 'monthly'
-    ? 'https://wa.me/14155238886?text=Hola!%20Quiero%20el%20plan%20mensual%20de%20CoachKai'
-    : 'https://wa.me/14155238886?text=Hola!%20Quiero%20el%20plan%20anual%20de%20CoachKai';
-  document.getElementById('ctaLink').href = link;
+}
+
+async function completeOnboarding() {
+  try {
+    await fetch('/api/onboarding/complete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        phone: data.phone,
+        name: data.name,
+        age: data.age,
+        weight: data.weight,
+        height: data.height,
+        goal: data.goal,
+        activity: data.activity,
+        coach_mode: data.coach || 'mentor',
+      })
+    });
+  } catch(e) {
+    console.error('onboarding save failed', e);
+  }
+  const msg = selectedPlan === 'annual'
+    ? 'Hola! Quiero el plan anual de CoachKai'
+    : 'Hola! Quiero el plan mensual de CoachKai';
+  window.open('https://wa.me/14155238886?text=' + encodeURIComponent(msg), '_blank');
 }
 
 function showResults() {

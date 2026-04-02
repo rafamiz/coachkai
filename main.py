@@ -1,7 +1,8 @@
+import hashlib
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, Response
 from twilio.twiml.messaging_response import MessagingResponse
 import uvicorn
@@ -37,6 +38,31 @@ def onboarding():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/api/onboarding/complete")
+async def onboarding_complete(request: Request):
+    data = await request.json()
+    phone = (data.get("phone") or "").replace("+", "").replace(" ", "").replace("-", "")
+    if not phone:
+        return {"ok": False, "error": "no phone"}
+
+    tid = int(hashlib.sha256(phone.encode()).hexdigest(), 16) % (2**31 - 1) + 1
+
+    db.upsert_user(
+        tid,
+        phone=phone,
+        name=data.get("name"),
+        age=int(data.get("age", 0)) or None,
+        weight_kg=float(data.get("weight", 0)) or None,
+        height_cm=float(data.get("height", 0)) or None,
+        goal=data.get("goal"),
+        activity_level=data.get("activity"),
+        coach_mode=data.get("coach_mode", "mentor"),
+        onboarding_complete=1,
+        onboarding_step="done",
+    )
+    return {"ok": True}
 
 
 @app.post("/webhook")
