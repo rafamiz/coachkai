@@ -180,7 +180,7 @@ Your goal is to deeply understand the user so you can give truly personalized ad
 
 
 
-You speak in Argentine Spanish ('vos', rioplatense), casual and friendly ??? like a knowledgeable friend, not a doctor.
+You speak in Argentine Spanish ('vos', rioplatense), casual and friendly — like a knowledgeable friend, not a doctor.
 
 
 
@@ -248,11 +248,11 @@ Conversation rules:
 
 
 
-- Be curious and natural ??? this is a conversation, not a form
+- Be curious and natural — this is a conversation, not a form
 
 
 
-- Do NOT rush to save the profile ??? make sure you have real detail on every topic
+- Do NOT rush to save the profile — make sure you have real detail on every topic
 
 
 
@@ -531,7 +531,7 @@ async def _ask(messages: list, system: str = SYSTEM_BASE) -> str:
 
 
 
-        return "Uy, tuve un problemita t??cnico ???? Intent?? de nuevo en un momento."
+        return "Hubo un error procesando tu mensaje. Intenta de nuevo."
 
 
 
@@ -559,11 +559,11 @@ async def intake_turn(history: list, user_message: str) -> dict:
 
 
 
-      {"reply": str, "done": False}                            ??? keep going
+      {"reply": str, "done": False}                            — keep going
 
 
 
-      {"reply": str|None, "done": True, "profile": dict}      ??? profile saved
+      {"reply": str|None, "done": True, "profile": dict}      — profile saved
 
 
 
@@ -719,7 +719,7 @@ async def intake_turn(history: list, user_message: str) -> dict:
 
 
 
-        return {"reply": "Uy, tuve un problemita ???? ??Pod??s repetir eso?", "done": False}
+        return {"reply": "Hubo un error. Podes repetir eso?", "done": False}
 
 
 
@@ -778,7 +778,7 @@ async def onboarding_welcome(name: str) -> str:
 
 
 
-        "content": f"El usuario se llama {name}. Dales la bienvenida al bot de nutrici??n en 2-3 oraciones, mencion?? su nombre y deciles que los vas a ayudar con su alimentaci??n."
+        "content": f"El usuario se llama {name}. Dales la bienvenida al bot de nutricion en 2-3 oraciones, menciona su nombre y deciles que los vas a ayudar con su alimentacion."
 
 
 
@@ -900,7 +900,7 @@ You have the user's full identity profile and today's eating context (injected b
 
 
 
-Use ALL of it ??? habits, preferences, schedule, goals, today's intake ??? for smart, precise responses.
+Use ALL of it — habits, preferences, schedule, goals, today's intake — for smart, precise responses.
 
 
 
@@ -920,7 +920,7 @@ MEAL LOGGING (use log_meal tool):
 
 
 
-  to make the most accurate calorie/macro estimate possible ??? not generic values
+  to make the most accurate calorie/macro estimate possible — not generic values
 
 
 
@@ -932,7 +932,7 @@ MEAL LOGGING (use log_meal tool):
 
 
 
-- tip field: include only if it adds real value ??? skip if the meal is clearly fine
+- tip field: include only if it adds real value — skip if the meal is clearly fine
 
 
 
@@ -960,7 +960,7 @@ MEAL RECOMMENDATIONS (text response, no tool):
 
 
 
-- Be actionable and concrete ??? not generic nutrition advice
+- Be actionable and concrete — not generic nutrition advice
 
 
 
@@ -1132,7 +1132,7 @@ LOG_WORKOUT_TOOL = {
 
 
 
-                "description": "Natural description of the workout (e.g. 'Corr?? 5km en 28 minutos')"
+                "description": "Natural description of the workout (e.g. 'Corri 5km en 28 minutos')"
 
 
 
@@ -1168,7 +1168,7 @@ LOG_WORKOUT_TOOL = {
 
 
 
-                    "Estimated calories burned. Use MET ?? weight_kg ?? duration_hours. "
+                    "Estimated calories burned. Use MET x weight_kg x duration_hours. "
 
 
 
@@ -1228,7 +1228,7 @@ LOG_WORKOUT_TOOL = {
 
 
 
-                "description": "Any extra context worth noting (e.g. 'partido ganado', 'entren?? piernas')."
+                "description": "Any extra context worth noting (e.g. 'partido ganado', 'entrene piernas')."
 
 
 
@@ -1488,7 +1488,7 @@ SAVE_MEMORY_TOOL = {
 
 
 
-        "Use when: user says 'record?? que...', reveals something medically relevant, "
+        "Use when: user says 'recorda que...', reveals something medically relevant, "
 
 
 
@@ -1692,7 +1692,7 @@ LOG_MEAL_TOOL = {
 
 
 
-        "Use the full context ??? user identity, today's meals, conversation history, time of day ??? "
+        "Use the full context — user identity, today's meals, conversation history, time of day — "
 
 
 
@@ -2250,7 +2250,7 @@ async def process_message(
 
 
 
-                {"type": "text", "text": text or "Registr?? esta comida."},
+                {"type": "text", "text": text or "Registra esta comida."},
 
 
 
@@ -2435,7 +2435,7 @@ async def process_message(
 
 
 
-        return {"type": "text", "content": "Uy, tuve un problemita t??cnico ???? Intent?? de nuevo en un momento."}
+        return {"type": "text", "content": "Hubo un error procesando tu mensaje. Intenta de nuevo."}
 
 
 
@@ -2497,15 +2497,15 @@ async def generate_proactive_message(
 
 
 
-      "pre_meal"         ??? ~30 min before usual meal time
+      "pre_meal"         — ~30 min before usual meal time
 
 
 
-      "meal_followup"    ??? ~45 min after usual meal time, meal not logged
+      "meal_followup"    — ~45 min after usual meal time, meal not logged
 
 
 
-      "workout_checkin"  ??? ~20 min after usual workout end, workout not logged
+      "workout_checkin"  — ~20 min after usual workout end, workout not logged
 
 
 
@@ -2657,7 +2657,7 @@ async def generate_proactive_message(
 
 
 
-            f"Ask casually if they already ate ??? keep it very short, 1 line max."
+            f"Ask casually if they already ate — keep it very short, 1 line max."
 
 
 
@@ -2762,7 +2762,7 @@ async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_
 
 
 
-        f"Hac?? un resumen diario de alimentaci??n para {user['name']}.\n"
+        f"Hace un resumen diario de alimentacion para {user['name']}.\n"
 
 
 
@@ -2778,11 +2778,11 @@ async def generate_chart_caption(user: dict, meals: list, total_cal: int, daily_
 
 
 
-        "Resumen en 2-3 oraciones: qu?? comi??, si estuvo bien, un aliento para ma??ana. "
+        "Resumen en 2-3 oraciones: que comio, si estuvo bien, un aliento para manana. "
 
 
 
-        "Agreg?? 1-2 emojis relevantes."
+        "Agrega 1-2 emojis relevantes."
 
 
 
@@ -2842,11 +2842,11 @@ async def generate_daily_summary(user: dict, meals: list, coach_mode: str = None
 
 
 
-        f"Hac?? un resumen diario de alimentaci??n para {user['name']}.\n"
+        f"Hace un resumen diario de alimentacion para {user['name']}.\n"
 
 
 
-        f"Comidas del d??a: {meal_list}\n"
+        f"Comidas del dia: {meal_list}\n"
 
 
 
@@ -2858,7 +2858,7 @@ async def generate_daily_summary(user: dict, meals: list, coach_mode: str = None
 
 
 
-        "Resumen en 3-4 oraciones: qu?? comi??, si estuvo bien para su objetivo, un aliento para ma??ana."
+        "Resumen en 3-4 oraciones: que comio, si estuvo bien para su objetivo, un aliento para manana."
 
 
 

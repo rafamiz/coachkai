@@ -339,7 +339,7 @@ async def _handle_text(user: dict, tid: int, text: str) -> str:
         _persist_result(user, tid, result, history, text)
         return _extract_reply(result)
     except Exception as e:
-        logger.error(f"[handler] process_message error for {tid}: {e}")
+        logger.error(f"[handler] process_message error for {tid}: {e}", exc_info=True)
         return "Hubo un error procesando tu mensaje. Intenta de nuevo."
 
 
@@ -348,9 +348,20 @@ async def _handle_text(user: dict, tid: int, text: str) -> str:
 # ------------------------------------------------------------------
 
 def _extract_reply(result: dict) -> str:
-    if result.get("type") == "meal":
+    rtype = result.get("type", "text")
+    if rtype == "meal":
         return result.get("reply") or "Comida registrada."
-    return result.get("content", "")
+    if rtype == "workout":
+        return result.get("reply") or "Ejercicio registrado."
+    if rtype == "identity_update":
+        return result.get("reply") or "Perfil actualizado."
+    if rtype == "delete_meal":
+        return result.get("reply") or "Comida eliminada."
+    if rtype == "set_reminder":
+        return result.get("reply") or "Recordatorio guardado."
+    if rtype == "save_memory":
+        return result.get("reply") or "Anotado."
+    return result.get("content") or result.get("reply") or ""
 
 
 def _persist_result(user: dict, tid: int, result: dict, history: list, user_text: str):
