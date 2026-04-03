@@ -243,7 +243,7 @@ async def _handle_main(user: dict, tid: int, text: str, media_url: str = None) -
 
     # First message after webapp onboarding — send welcome
     meals = db.get_today_meals(tid)
-    all_meals = db.get_meals_for_user(tid) if not meals else meals
+    all_meals = db.get_weekly_meals(tid) if not meals else meals
     if not all_meals and text_lower not in ("/stats", "/plan", "/coach", "/reset", "/start"):
         name = user.get("name", "")
         coach_mode = user.get("coach_mode", "mentor")
