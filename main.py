@@ -47,7 +47,13 @@ async def onboarding_complete(request: Request):
     if not phone:
         return {"ok": False, "error": "no phone"}
 
-    tid = int(hashlib.sha256(phone.encode()).hexdigest(), 16) % (2**31 - 1) + 1
+    # Look up existing user by phone first (bot already created them)
+    existing = db.get_user_by_phone(phone)
+    if existing:
+        tid = existing["telegram_id"]
+    else:
+        # Fallback: derive tid from phone (same as whatsapp_handler)
+        tid = int(hashlib.sha256(phone.encode()).hexdigest(), 16) % (2**31 - 1) + 1
 
     db.upsert_user(
         tid,
