@@ -1,7 +1,13 @@
+import re
 import sqlite3
 import os
 import secrets
 from datetime import datetime
+
+
+def normalize_phone(phone: str) -> str:
+    """Strip all non-digit characters from phone number."""
+    return re.sub(r'\D', '', phone or '')
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 _USE_POSTGRES = bool(DATABASE_URL)
@@ -538,6 +544,7 @@ def upsert_user(telegram_id: int, **kwargs):
 
 
 def get_user_by_phone(phone: str):
+    phone = normalize_phone(phone)
     conn = get_conn()
     c = _cur(conn)
     c.execute(_q("SELECT * FROM users WHERE phone = ?"), (phone,))

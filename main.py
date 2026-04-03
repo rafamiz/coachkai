@@ -46,7 +46,7 @@ def health():
 @app.post("/api/onboarding/complete")
 async def onboarding_complete(request: Request):
     data = await request.json()
-    phone = (data.get("phone") or "").replace("+", "").replace(" ", "").replace("-", "")
+    phone = db.normalize_phone(data.get("phone") or "")
     if not phone:
         return {"ok": False, "error": "no phone"}
 
@@ -95,7 +95,7 @@ async def webhook(
     MediaUrl0: str = Form(None),
     MediaContentType0: str = Form(None),
 ):
-    numero = From.replace("whatsapp:", "").lstrip("+")
+    numero = db.normalize_phone(From.replace("whatsapp:", ""))
     has_media = int(NumMedia) > 0
     reply = await handle_message(numero, Body, MediaUrl0 if has_media else None)
     resp = MessagingResponse()

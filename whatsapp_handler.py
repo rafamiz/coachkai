@@ -72,36 +72,40 @@ COACH_MODES = {"1": "mentor", "2": "roaster"}
 # ------------------------------------------------------------------
 
 async def handle_message(numero: str, text: str, media_url: str = None) -> str:
-    text = (text or "").strip()
-    numero = numero.lstrip("+")  # normalize: always store without +
-    user = get_or_create_user(numero)
-    tid  = user["telegram_id"]
+    try:
+        text = (text or "").strip()
+        numero = db.normalize_phone(numero)
+        user = get_or_create_user(numero)
+        tid  = user["telegram_id"]
 
-    logger.info(f"[handle_message] numero={numero}, onboarding_complete={user.get('onboarding_complete')}, step={user.get('onboarding_step')}")
+        logger.info(f"[handle_message] numero={numero}, onboarding_complete={user.get('onboarding_complete')}, step={user.get('onboarding_step')}")
 
-    db.update_last_seen(tid)
+        db.update_last_seen(tid)
 
-    # /reset works at any point
-    if text.lower() == "/reset":
-        db.upsert_user(
-            tid,
-            onboarding_complete=0,
-            onboarding_step=None,
-            name=None,
-            age=None,
-            weight_kg=None,
-            height_cm=None,
-            goal=None,
-            activity_level=None,
-        )
-        return "Perfil reseteado. Escribi cualquier cosa para empezar de nuevo."
+        # /reset works at any point
+        if text.lower() == "/reset":
+            db.upsert_user(
+                tid,
+                onboarding_complete=0,
+                onboarding_step=None,
+                name=None,
+                age=None,
+                weight_kg=None,
+                height_cm=None,
+                goal=None,
+                activity_level=None,
+            )
+            return "Perfil reseteado. Escribi cualquier cosa para empezar de nuevo."
 
-    # User is considered onboarded if onboarding_complete == 1
-    if user.get("onboarding_complete") == 1:
-        return await _handle_main(user, tid, text, media_url)
+        # User is considered onboarded if onboarding_complete == 1
+        if user.get("onboarding_complete") == 1:
+            return await _handle_main(user, tid, text, media_url)
 
-    step = user.get("onboarding_step")
-    return await _handle_onboarding(user, tid, step, text)
+        step = user.get("onboarding_step")
+        return await _handle_onboarding(user, tid, step, text)
+    except Exception as e:
+        logger.error(f"[handle_message] UNHANDLED ERROR for {numero}: {e}", exc_info=True)
+        return "Hubo un error procesando tu mensaje. Intenta de nuevo en unos minutos."
 
 
 # ------------------------------------------------------------------
