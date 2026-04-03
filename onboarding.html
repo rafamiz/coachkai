@@ -485,17 +485,7 @@ input::placeholder { color: #4a4a6a; }
     <button class="btn btn-primary" onclick="goTo(8)">Ver mi plan completo →</button>
   </div>
 
-  <!-- Slide 9: Phone -->
-  <div class="slide">
-    <h2>Tu número de WhatsApp</h2>
-    <p class="subtitle">Para enviarte tu plan personalizado por WhatsApp</p>
-    <div class="gap-md"></div>
-    <input type="tel" id="phoneInput" placeholder="+54 11 1234-5678" autocomplete="tel">
-    <div class="gap-md"></div>
-    <button class="btn btn-primary" id="phoneBtn" disabled onclick="savePhone()">Continuar →</button>
-  </div>
-
-  <!-- Slide 10: Paywall -->
+  <!-- Slide 9: Paywall -->
   <div class="slide">
     <h2 id="paywallTitle">Tu plan está listo 🎉</h2>
     <div class="gap-sm"></div>
@@ -531,8 +521,9 @@ input::placeholder { color: #4a4a6a; }
 
 <script>
 let current = 0;
-const totalSlides = 10;
-const data = { name: '', goal: '', activity: '', age: 0, weight: 0, height: 0, coach: '', phone: '' };
+const totalSlides = 9;
+const urlParams = new URLSearchParams(window.location.search);
+const data = { name: '', goal: '', activity: '', age: 0, weight: 0, height: 0, coach: '', phone: urlParams.get('phone') || '' };
 
 function goTo(i) {
   current = i;
@@ -541,7 +532,6 @@ function goTo(i) {
 
   // Auto-focus inputs
   if (i === 1) setTimeout(() => document.getElementById('nameInput').focus(), 400);
-  if (i === 8) setTimeout(() => document.getElementById('phoneInput').focus(), 400);
 
   // Start loading animation
   if (i === 6) startLoading();
@@ -636,21 +626,7 @@ function calcCalories(age, weight, height, goal, activity) {
   return Math.round(tdee);
 }
 
-// Slide 9: Phone
-const phoneInput = document.getElementById('phoneInput');
-const phoneBtn = document.getElementById('phoneBtn');
-phoneInput.addEventListener('input', () => {
-  phoneBtn.disabled = phoneInput.value.replace(/[\s\-\+\(\)]/g, '').length < 6;
-});
-phoneInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !phoneBtn.disabled) savePhone();
-});
-function savePhone() {
-  data.phone = phoneInput.value.trim();
-  goTo(9);
-}
-
-// Slide 10: Plan selection
+// Slide 9: Plan selection
 let selectedPlan = 'annual';
 function pickPlan(plan) {
   selectedPlan = plan;

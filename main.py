@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -9,6 +10,8 @@ import uvicorn
 
 import db
 from whatsapp_handler import handle_message
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -47,13 +50,22 @@ async def onboarding_complete(request: Request):
     if not phone:
         return {"ok": False, "error": "no phone"}
 
+    logger.info(f"[onboarding/complete] phone={phone}, data={data}")
+
     # Look up existing user by phone first (bot already created them)
     existing = db.get_user_by_phone(phone)
+    logger.info(f"[onboarding/complete] existing user={existing}")
+
     if existing:
         tid = existing["telegram_id"]
     else:
         # Fallback: derive tid from phone (same as whatsapp_handler)
         tid = int(hashlib.sha256(phone.encode()).hexdigest(), 16) % (2**31 - 1) + 1
+
+    # Normalize coach_mode: webapp sends "challenger" but bot uses "roaster"
+    coach_mode = data.get("coach_mode", "mentor")
+    if coach_mode == "challenger":
+        coach_mode = "roaster"
 
     db.upsert_user(
         tid,
@@ -64,10 +76,14 @@ async def onboarding_complete(request: Request):
         height_cm=float(data.get("height", 0)) or None,
         goal=data.get("goal"),
         activity_level=data.get("activity"),
-        coach_mode=data.get("coach_mode", "mentor"),
+        coach_mode=coach_mode,
         onboarding_complete=1,
         onboarding_step="done",
     )
+
+    updated = db.get_user_by_phone(phone)
+    logger.info(f"[onboarding/complete] updated user={updated}")
+
     return {"ok": True}
 
 
@@ -79,7 +95,7 @@ async def webhook(
     MediaUrl0: str = Form(None),
     MediaContentType0: str = Form(None),
 ):
-    numero = From.replace("whatsapp:", "")
+    numero = From.replace("whatsapp:", "").lstrip("+")
     has_media = int(NumMedia) > 0
     reply = await handle_message(numero, Body, MediaUrl0 if has_media else None)
     resp = MessagingResponse()

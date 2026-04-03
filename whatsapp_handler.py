@@ -73,8 +73,11 @@ COACH_MODES = {"1": "mentor", "2": "roaster"}
 
 async def handle_message(numero: str, text: str, media_url: str = None) -> str:
     text = (text or "").strip()
+    numero = numero.lstrip("+")  # normalize: always store without +
     user = get_or_create_user(numero)
     tid  = user["telegram_id"]
+
+    logger.info(f"[handle_message] numero={numero}, onboarding_complete={user.get('onboarding_complete')}, step={user.get('onboarding_step')}")
 
     db.update_last_seen(tid)
 
@@ -93,13 +96,12 @@ async def handle_message(numero: str, text: str, media_url: str = None) -> str:
         )
         return "Perfil reseteado. Escribi cualquier cosa para empezar de nuevo."
 
-    step             = user.get("onboarding_step")
-    onboarding_done  = user.get("onboarding_complete", 0)
+    # User is considered onboarded if onboarding_complete == 1
+    if user.get("onboarding_complete") == 1:
+        return await _handle_main(user, tid, text, media_url)
 
-    if not onboarding_done:
-        return await _handle_onboarding(user, tid, step, text)
-
-    return await _handle_main(user, tid, text, media_url)
+    step = user.get("onboarding_step")
+    return await _handle_onboarding(user, tid, step, text)
 
 
 # ------------------------------------------------------------------
@@ -109,20 +111,22 @@ async def handle_message(numero: str, text: str, media_url: str = None) -> str:
 async def _handle_onboarding(user: dict, tid: int, step, text: str) -> str:
     # Brand-new user — send webapp link
     if step is None:
+        phone = user.get("phone", "")
         db.upsert_user(tid, onboarding_step="awaiting_webapp")
         return (
             "Hola! Soy CoachKai, tu coach de nutrición personal 🤖\n\n"
             "Para empezar, completá tu perfil en 2 minutos:\n"
-            "👉 https://coachkai-production.up.railway.app/onboarding\n\n"
+            f"👉 https://coachkai-production.up.railway.app/onboarding?phone={phone}\n\n"
             "Ahí elegís tu objetivo, tus datos y el tipo de coach que querés.\n"
             "Al final te cuento cómo funciona todo 💪"
         )
 
     # Sent webapp link, waiting for them to complete it
     if step == "awaiting_webapp":
+        phone = user.get("phone", "")
         return (
             "Todavía no completaste tu perfil. Entrá acá y listo:\n"
-            "👉 https://coachkai-production.up.railway.app/onboarding"
+            f"👉 https://coachkai-production.up.railway.app/onboarding?phone={phone}"
         )
 
     if step == "awaiting_name":
@@ -232,6 +236,27 @@ async def _handle_onboarding(user: dict, tid: int, step, text: str) -> str:
 
 async def _handle_main(user: dict, tid: int, text: str, media_url: str = None) -> str:
     text_lower = text.lower()
+
+    # First message after webapp onboarding — send welcome
+    meals = db.get_today_meals(tid)
+    all_meals = db.get_meals_for_user(tid) if not meals else meals
+    if not all_meals and text_lower not in ("/stats", "/plan", "/coach", "/reset", "/start"):
+        name = user.get("name", "")
+        coach_mode = user.get("coach_mode", "mentor")
+        coach_mode_name = "El Mentor" if coach_mode == "mentor" else "El Challenger"
+        welcome = (
+            f"¡Bienvenido/a {name}! 🎉 Tu perfil está listo.\n"
+            f"Soy {coach_mode_name}, tu coach personal.\n"
+            "Podés empezar mandándome una foto de tu próxima comida o texto de lo que comiste."
+        )
+        if text and not text_lower.startswith("/"):
+            # Process their message too
+            reply = await _handle_text(user, tid, text)
+            return f"{welcome}\n\n{reply}"
+        if media_url:
+            reply = await _handle_photo(user, tid, text, media_url)
+            return f"{welcome}\n\n{reply}"
+        return welcome
 
     # Mid-session coach change
     if user.get("onboarding_step") == "awaiting_coach":
