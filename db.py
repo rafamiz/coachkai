@@ -287,6 +287,22 @@ def init_db():
             )
         """)
 
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT UNIQUE NOT NULL,
+                status TEXT DEFAULT 'trial',
+                trial_start TIMESTAMP DEFAULT NOW(),
+                trial_end TIMESTAMP,
+                mp_preapproval_id TEXT,
+                mp_payer_email TEXT,
+                current_period_start TIMESTAMP,
+                current_period_end TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
     else:
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -467,6 +483,22 @@ def init_db():
                 content TEXT NOT NULL,
                 category TEXT DEFAULT 'general',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER UNIQUE NOT NULL,
+                status TEXT DEFAULT 'trial',
+                trial_start TEXT DEFAULT (datetime('now')),
+                trial_end TEXT,
+                mp_preapproval_id TEXT,
+                mp_payer_email TEXT,
+                current_period_start TEXT,
+                current_period_end TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
             )
         """)
 
@@ -1147,3 +1179,113 @@ def update_last_proactive_sent(telegram_id: int):
         c.execute("UPDATE users SET last_proactive_sent = datetime('now') WHERE telegram_id = ?", (telegram_id,))
     conn.commit()
     _release(conn)
+
+
+# --- Subscriptions ---
+
+def create_trial(telegram_id: int):
+    """Create a 7-day free trial for a user."""
+    from datetime import timedelta
+    import pytz as _tz
+    _BA = _tz.timezone("America/Argentina/Buenos_Aires")
+    now = datetime.now(_BA)
+    trial_end = now + timedelta(days=7)
+
+    conn = get_conn()
+    c = _cur(conn)
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    end_str = trial_end.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Upsert: if subscription exists, update; otherwise insert
+    c.execute(_q("SELECT id FROM subscriptions WHERE telegram_id = ?"), (telegram_id,))
+    row = c.fetchone()
+    if row:
+        c.execute(_q(
+            "UPDATE subscriptions SET status = 'trial', trial_start = ?, trial_end = ?, updated_at = ? "
+            "WHERE telegram_id = ?"
+        ), (now_str, end_str, now_str, telegram_id))
+    else:
+        c.execute(_q(
+            "INSERT INTO subscriptions (telegram_id, status, trial_start, trial_end, created_at, updated_at) "
+            "VALUES (?, 'trial', ?, ?, ?, ?)"
+        ), (telegram_id, now_str, end_str, now_str, now_str))
+    conn.commit()
+    _release(conn)
+
+
+def get_subscription(telegram_id: int):
+    """Get subscription for a user."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT * FROM subscriptions WHERE telegram_id = ?"), (telegram_id,))
+    row = c.fetchone()
+    _release(conn)
+    return dict(row) if row else None
+
+
+def update_subscription(telegram_id: int, **kwargs):
+    """Update subscription fields."""
+    if not kwargs:
+        return
+    import pytz as _tz
+    _BA = _tz.timezone("America/Argentina/Buenos_Aires")
+    now_str = datetime.now(_BA).strftime("%Y-%m-%d %H:%M:%S")
+    kwargs["updated_at"] = now_str
+
+    conn = get_conn()
+    c = _cur(conn)
+    sets = ", ".join(f"{k} = ?" for k in kwargs)
+    vals = list(kwargs.values()) + [telegram_id]
+    c.execute(_q(f"UPDATE subscriptions SET {sets} WHERE telegram_id = ?"), vals)
+    conn.commit()
+    _release(conn)
+
+
+def is_user_active(telegram_id: int) -> bool:
+    """Check if user has active trial or subscription."""
+    sub = get_subscription(telegram_id)
+    if not sub:
+        return False
+
+    status = sub.get("status", "")
+    if status == "active":
+        return True
+
+    if status == "trial":
+        trial_end = sub.get("trial_end")
+        if not trial_end:
+            return False
+        if isinstance(trial_end, str):
+            try:
+                trial_end = datetime.fromisoformat(trial_end)
+            except Exception:
+                return False
+        import pytz as _tz
+        _BA = _tz.timezone("America/Argentina/Buenos_Aires")
+        now = datetime.now(_BA)
+        if trial_end.tzinfo is None:
+            trial_end = _BA.localize(trial_end)
+        return now < trial_end
+
+    return False
+
+
+def get_expiring_soon(days: int = 2) -> list:
+    """Get users whose trial or subscription expires within N days."""
+    from datetime import timedelta
+    import pytz as _tz
+    _BA = _tz.timezone("America/Argentina/Buenos_Aires")
+    now = datetime.now(_BA)
+    cutoff = (now + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q(
+        "SELECT s.*, u.phone, u.name FROM subscriptions s "
+        "JOIN users u ON u.telegram_id = s.telegram_id "
+        "WHERE s.status = 'trial' AND s.trial_end <= ? AND s.trial_end > ?"
+    ), (cutoff, now_str))
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)

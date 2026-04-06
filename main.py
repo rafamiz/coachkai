@@ -9,6 +9,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 import uvicorn
 
 import db
+import payments
 from whatsapp_handler import handle_message
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,10 @@ async def onboarding_complete(request: Request):
     updated = db.get_user_by_phone(phone)
     logger.info(f"[onboarding/complete] updated user={updated}")
 
+    # Create 7-day free trial
+    db.create_trial(tid)
+    logger.info(f"[onboarding/complete] trial created for tid={tid}")
+
     return {"ok": True}
 
 
@@ -101,6 +106,61 @@ async def webhook(
     resp = MessagingResponse()
     resp.message(reply)
     return Response(content=str(resp), media_type="application/xml")
+
+
+@app.post("/webhook/mercadopago")
+async def mp_webhook(request: Request):
+    """Receive MercadoPago IPN notifications."""
+    try:
+        data = await request.json()
+        logger.info(f"[mp_webhook] received: {data}")
+        payments.handle_webhook(data)
+    except Exception as e:
+        logger.error(f"[mp_webhook] error: {e}", exc_info=True)
+    # Always return 200 so MP doesn't retry
+    return {"ok": True}
+
+
+@app.get("/subscription/success", response_class=HTMLResponse)
+def subscription_success(tid: str = ""):
+    return HTMLResponse("""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CoachKai — Suscripcion activa</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px}
+  .card{background:#fff;border-radius:18px;padding:44px 28px;text-align:center;max-width:360px;width:100%;box-shadow:0 2px 16px rgba(0,0,0,.09)}
+  .icon{font-size:3.2rem;margin-bottom:16px}
+  h1{font-size:1.4rem;margin-bottom:10px}
+  p{color:#666;font-size:.95rem;line-height:1.55}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">🎉</div>
+  <h1>Suscripcion activada!</h1>
+  <p>Tu pago fue procesado correctamente. Volve a WhatsApp y segui usando CoachKai sin limites.</p>
+</div>
+</body>
+</html>""")
+
+
+@app.get("/api/subscription/checkout")
+async def subscription_checkout(phone: str = "", email: str = ""):
+    """Generate a MercadoPago checkout URL for a user."""
+    phone = db.normalize_phone(phone)
+    if not phone or not email:
+        return {"ok": False, "error": "phone and email required"}
+    user = db.get_user_by_phone(phone)
+    if not user:
+        return {"ok": False, "error": "user not found"}
+    tid = user["telegram_id"]
+    url = payments.get_checkout_url(tid, email)
+    if url:
+        return {"ok": True, "checkout_url": url}
+    return {"ok": False, "error": "could not create checkout"}
 
 
 if __name__ == "__main__":

@@ -109,6 +109,7 @@ def start_scheduler_twilio(sid: str, token: str, from_number: str):
     _scheduler.add_job(check_training_reminders, "interval", minutes=5, id="training_reminders")
     _scheduler.add_job(send_inactivity_checkin,  "interval", hours=1,   id="inactivity_check")
     _scheduler.add_job(send_macro_nudge, "cron", hour=19, minute=0, id="macro_nudge")
+    _scheduler.add_job(check_subscriptions, "interval", hours=6, id="subscription_check")
     _scheduler.start()
     logger.info("Scheduler started (Twilio mode)")
 
@@ -735,3 +736,58 @@ async def send_inactivity_checkin():
             logger.info(f"[scheduler] Sent inactivity checkin to {tid} ({hours_inactive:.1f}h inactive)")
         except Exception as e:
             logger.error(f"[scheduler] inactivity checkin error for {tid}: {e}")
+
+
+# ------------------------------------------------------------------
+# Subscription expiration checks
+# ------------------------------------------------------------------
+
+import os as _os
+_APP_URL = _os.environ.get("APP_URL", "https://coachkai-production.up.railway.app")
+
+
+async def check_subscriptions():
+    """Check for expiring trials and subscriptions, notify users."""
+    if not _is_active():
+        return
+    try:
+        # Users whose trial expires in the next 2 days
+        expiring = db.get_expiring_soon(days=2)
+        for row in expiring:
+            tid = row.get("telegram_id")
+            name = row.get("name", "")
+            status = row.get("status", "")
+
+            if not tid:
+                continue
+
+            # Don't send if already sent today
+            if db.already_sent_followup_today(tid, "subscription_expiring"):
+                continue
+
+            try:
+                if status == "trial":
+                    msg = (
+                        f"Hola {name}! Tu periodo de prueba gratuito esta por terminar.\n\n"
+                        "Para no perder acceso a CoachKai, activa tu suscripcion:\n"
+                        f"👉 {_APP_URL}/subscription/payment\n\n"
+                        "Asi seguis con tu plan y tu progreso 💪"
+                    )
+                else:
+                    msg = (
+                        f"Hola {name}! Tu suscripcion esta por vencer.\n\n"
+                        "Renova para seguir usando CoachKai:\n"
+                        f"👉 {_APP_URL}/subscription/payment"
+                    )
+                await _send_to_tid(tid, msg)
+
+                # Get user_id for followup tracking
+                user = db.get_user(tid)
+                if user:
+                    db.add_followup(user["id"], msg, "subscription_expiring")
+
+                logger.info(f"[scheduler] Sent subscription expiring notice to {tid}")
+            except Exception as e:
+                logger.error(f"[scheduler] subscription notice error for {tid}: {e}")
+    except Exception as e:
+        logger.error(f"[scheduler] check_subscriptions error: {e}", exc_info=True)

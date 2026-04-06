@@ -14,8 +14,11 @@ import pytz
 
 import ai
 import db
+import payments
 
 logger = logging.getLogger(__name__)
+
+APP_URL = os.environ.get("APP_URL", "https://coachkai-production.up.railway.app")
 
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN  = os.environ.get("TWILIO_AUTH_TOKEN", "")
@@ -67,6 +70,40 @@ ACTIVITIES = {"1": "sedentary", "2": "lightly_active", "3": "active", "4": "very
 COACH_MODES = {"1": "mentor", "2": "roaster"}
 
 
+def _check_access(tid: int) -> str | None:
+    """
+    Check if user has active subscription or trial.
+    Returns None if access is granted, or a blocking message if not.
+    """
+    if db.is_user_active(tid):
+        return None
+
+    sub = db.get_subscription(tid)
+    if sub and sub.get("status") == "trial":
+        # Trial expired
+        return (
+            "Tu periodo de prueba gratuito termino.\n\n"
+            "Para seguir usando CoachKai, activa tu suscripcion:\n"
+            f"👉 {APP_URL}/subscription/payment\n\n"
+            "Son solo unos segundos y despues seguis como siempre 💪"
+        )
+
+    if sub and sub.get("status") in ("cancelled", "past_due"):
+        return (
+            "Tu suscripcion esta inactiva.\n\n"
+            "Reactiva tu plan para seguir usando CoachKai:\n"
+            f"👉 {APP_URL}/subscription/payment\n\n"
+            "Te estamos esperando 💪"
+        )
+
+    # No subscription at all (shouldn't happen after onboarding, but just in case)
+    return (
+        "No tenes una suscripcion activa.\n\n"
+        "Activa tu plan para usar CoachKai:\n"
+        f"👉 {APP_URL}/subscription/payment"
+    )
+
+
 # ------------------------------------------------------------------
 # Main entry point
 # ------------------------------------------------------------------
@@ -99,6 +136,10 @@ async def handle_message(numero: str, text: str, media_url: str = None) -> str:
 
         # User is considered onboarded if onboarding_complete == 1
         if user.get("onboarding_complete") == 1:
+            # Check subscription/trial access before processing
+            block_msg = _check_access(tid)
+            if block_msg:
+                return block_msg
             return await _handle_main(user, tid, text, media_url)
 
         step = user.get("onboarding_step")
