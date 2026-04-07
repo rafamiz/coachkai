@@ -121,6 +121,90 @@ async def mp_webhook(request: Request):
     return {"ok": True}
 
 
+@app.get("/subscription/payment", response_class=HTMLResponse)
+def subscription_payment(phone: str = ""):
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CoachKai — Activar suscripcion</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px}}
+  .card{{background:#fff;border-radius:18px;padding:36px 24px;max-width:400px;width:100%;box-shadow:0 2px 16px rgba(0,0,0,.09)}}
+  h1{{font-size:1.3rem;margin-bottom:6px;text-align:center}}
+  .subtitle{{color:#666;font-size:.9rem;text-align:center;margin-bottom:24px;line-height:1.5}}
+  .price{{text-align:center;margin-bottom:20px}}
+  .price-amount{{font-size:2rem;font-weight:800;color:#2d9d8f}}
+  .price-period{{font-size:.85rem;color:#999}}
+  .trial-badge{{display:block;text-align:center;background:#e8f5f3;color:#2d9d8f;font-weight:600;font-size:.88rem;padding:8px;border-radius:8px;margin-bottom:24px}}
+  .field{{margin-bottom:16px}}
+  label{{display:block;font-size:.85rem;font-weight:600;color:#444;margin-bottom:6px}}
+  input[type=email]{{width:100%;padding:13px 14px;border:1.5px solid #ddd;border-radius:10px;font-size:1rem;outline:none;-webkit-appearance:none}}
+  input:focus{{border-color:#2d9d8f}}
+  button{{width:100%;padding:15px;background:#2d9d8f;color:#fff;border:none;border-radius:12px;font-size:1.05rem;font-weight:700;cursor:pointer;margin-top:8px;-webkit-appearance:none}}
+  button:active{{background:#258a7e}}
+  button:disabled{{opacity:.6;cursor:not-allowed}}
+  .error{{color:#c62828;font-size:.85rem;margin-top:10px;text-align:center;display:none}}
+  .note{{color:#999;font-size:.78rem;text-align:center;margin-top:16px;line-height:1.4}}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Activa CoachKai</h1>
+  <p class="subtitle">Seguimiento nutricional con IA, todos los dias en tu WhatsApp.</p>
+  <div class="price">
+    <div class="price-amount">$9.999</div>
+    <div class="price-period">por mes</div>
+  </div>
+  <div class="trial-badge">Los primeros 7 dias son gratis</div>
+  <form id="payForm" onsubmit="return handleSubmit(event)">
+    <div class="field">
+      <label for="email">Tu email (para el recibo de pago)</label>
+      <input type="email" id="email" name="email" placeholder="tu@email.com" required>
+    </div>
+    <button type="submit" id="submitBtn">Activar suscripcion</button>
+    <div class="error" id="error"></div>
+  </form>
+  <p class="note">Se te va a debitar automaticamente cada mes. Podes cancelar cuando quieras desde WhatsApp.</p>
+</div>
+<script>
+var phone = '{phone}';
+function handleSubmit(e) {{
+  e.preventDefault();
+  var btn = document.getElementById('submitBtn');
+  var errEl = document.getElementById('error');
+  var email = document.getElementById('email').value.trim();
+  if (!email) return;
+  btn.disabled = true;
+  btn.textContent = 'Redirigiendo...';
+  errEl.style.display = 'none';
+  fetch('/api/subscription/checkout?phone=' + encodeURIComponent(phone) + '&email=' + encodeURIComponent(email))
+    .then(function(r) {{ return r.json(); }})
+    .then(function(data) {{
+      if (data.ok && data.checkout_url) {{
+        window.location.href = data.checkout_url;
+      }} else {{
+        errEl.textContent = 'No se pudo crear el checkout. Intenta de nuevo.';
+        errEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Activar suscripcion';
+      }}
+    }})
+    .catch(function() {{
+      errEl.textContent = 'Error de conexion. Intenta de nuevo.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Activar suscripcion';
+    }});
+  return false;
+}}
+</script>
+</body>
+</html>""")
+
+
 @app.get("/subscription/success", response_class=HTMLResponse)
 def subscription_success(tid: str = ""):
     return HTMLResponse("""<!DOCTYPE html>

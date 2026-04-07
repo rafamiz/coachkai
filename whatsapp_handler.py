@@ -79,29 +79,36 @@ def _check_access(tid: int) -> str | None:
         return None
 
     sub = db.get_subscription(tid)
-    if sub and sub.get("status") == "trial":
+
+    # No subscription at all — existing user before paywall was added.
+    # Auto-create a trial so they aren't locked out.
+    if not sub:
+        db.create_trial(tid)
+        return None
+
+    if sub.get("status") == "trial":
         # Trial expired
+        user = db.get_user(tid)
+        phone = user.get("phone", "") if user else ""
         return (
             "Tu periodo de prueba gratuito termino.\n\n"
             "Para seguir usando CoachKai, activa tu suscripcion:\n"
-            f"👉 {APP_URL}/subscription/payment\n\n"
+            f"👉 {APP_URL}/subscription/payment?phone={phone}\n\n"
             "Son solo unos segundos y despues seguis como siempre 💪"
         )
 
-    if sub and sub.get("status") in ("cancelled", "past_due"):
+    if sub.get("status") in ("cancelled", "past_due"):
+        user = db.get_user(tid)
+        phone = user.get("phone", "") if user else ""
         return (
             "Tu suscripcion esta inactiva.\n\n"
             "Reactiva tu plan para seguir usando CoachKai:\n"
-            f"👉 {APP_URL}/subscription/payment\n\n"
+            f"👉 {APP_URL}/subscription/payment?phone={phone}\n\n"
             "Te estamos esperando 💪"
         )
 
-    # No subscription at all (shouldn't happen after onboarding, but just in case)
-    return (
-        "No tenes una suscripcion activa.\n\n"
-        "Activa tu plan para usar CoachKai:\n"
-        f"👉 {APP_URL}/subscription/payment"
-    )
+    # Fallback
+    return None
 
 
 # ------------------------------------------------------------------
