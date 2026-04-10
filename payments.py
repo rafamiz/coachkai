@@ -132,13 +132,18 @@ def handle_webhook(data: dict) -> bool:
         new_status = status_map.get(mp_status)
 
         if new_status:
-            update_kwargs = {"status": new_status, "mp_preapproval_id": resource_id}
-            if new_status == "active":
+            if new_status == "trial":
+                # Card registered — start 7-day free trial
+                db.create_trial(telegram_id)
+                db.update_subscription(telegram_id, mp_preapproval_id=resource_id)
+            elif new_status == "active":
+                update_kwargs = {"status": new_status, "mp_preapproval_id": resource_id}
                 update_kwargs["current_period_start"] = now_str
-                # Next billing ~30 days from now
                 next_end = (datetime.now(_BA) + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
                 update_kwargs["current_period_end"] = next_end
-            db.update_subscription(telegram_id, **update_kwargs)
+                db.update_subscription(telegram_id, **update_kwargs)
+            else:
+                db.update_subscription(telegram_id, status=new_status, mp_preapproval_id=resource_id)
             logger.info(f"[payments] Subscription updated: tid={telegram_id}, mp_status={mp_status} -> {new_status}")
         else:
             logger.info(f"[payments] Unhandled MP status: {mp_status} for tid={telegram_id}")
@@ -146,6 +151,18 @@ def handle_webhook(data: dict) -> bool:
         return True
     except Exception as e:
         logger.error(f"[payments] Webhook processing error: {e}", exc_info=True)
+        return False
+
+
+def cancel_preapproval(mp_preapproval_id: str) -> bool:
+    """Cancel a MercadoPago preapproval subscription."""
+    if not sdk or not mp_preapproval_id:
+        return False
+    try:
+        result = sdk.preapproval().update(mp_preapproval_id, {"status": "cancelled"})
+        return result.get("status") in (200, 201)
+    except Exception as e:
+        logger.error(f"[payments] Error cancelling preapproval {mp_preapproval_id}: {e}")
         return False
 
 

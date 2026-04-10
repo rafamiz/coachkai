@@ -1213,6 +1213,30 @@ def create_trial(telegram_id: int):
     _release(conn)
 
 
+def create_pending_subscription(telegram_id: int):
+    """Create a subscription with pending_payment status (card not yet entered)."""
+    import pytz as _tz
+    _BA = _tz.timezone("America/Argentina/Buenos_Aires")
+    now_str = datetime.now(_BA).strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT id FROM subscriptions WHERE telegram_id = ?"), (telegram_id,))
+    row = c.fetchone()
+    if row:
+        c.execute(_q(
+            "UPDATE subscriptions SET status = 'pending_payment', updated_at = ? "
+            "WHERE telegram_id = ?"
+        ), (now_str, telegram_id))
+    else:
+        c.execute(_q(
+            "INSERT INTO subscriptions (telegram_id, status, created_at, updated_at) "
+            "VALUES (?, 'pending_payment', ?, ?)"
+        ), (telegram_id, now_str, now_str))
+    conn.commit()
+    _release(conn)
+
+
 def get_subscription(telegram_id: int):
     """Get subscription for a user."""
     conn = get_conn()

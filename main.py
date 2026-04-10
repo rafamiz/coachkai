@@ -91,9 +91,9 @@ async def onboarding_complete(request: Request):
     updated = db.get_user_by_phone(phone)
     logger.info(f"[onboarding/complete] updated user={updated}")
 
-    # Create 7-day free trial
-    db.create_trial(tid)
-    logger.info(f"[onboarding/complete] trial created for tid={tid}")
+    # Card-first: user must enter card before getting access
+    db.create_pending_subscription(tid)
+    logger.info(f"[onboarding/complete] pending_payment subscription created for tid={tid}")
 
     return {"ok": True}
 

@@ -79,17 +79,19 @@ def _check_access(tid: int) -> str | None:
         return None
 
     sub = db.get_subscription(tid)
+    user = db.get_user(tid)
+    phone = user.get("phone", "") if user else ""
 
-    # No subscription at all — existing user before paywall was added.
-    # Auto-create a trial so they aren't locked out.
-    if not sub:
-        db.create_trial(tid)
-        return None
+    # No subscription or pending_payment — must enter card first
+    if not sub or sub.get("status") == "pending_payment":
+        return (
+            "Para empezar tus 7 dias gratis, necesitas registrar tu tarjeta. "
+            "No se te cobra nada hasta el dia 8.\n"
+            f"👉 {APP_URL}/subscription/payment?phone={phone}"
+        )
 
     if sub.get("status") == "trial":
         # Trial expired
-        user = db.get_user(tid)
-        phone = user.get("phone", "") if user else ""
         return (
             "Tu periodo de prueba gratuito termino.\n\n"
             "Para seguir usando CoachKai, activa tu suscripcion:\n"
@@ -98,8 +100,6 @@ def _check_access(tid: int) -> str | None:
         )
 
     if sub.get("status") in ("cancelled", "past_due"):
-        user = db.get_user(tid)
-        phone = user.get("phone", "") if user else ""
         return (
             "Tu suscripcion esta inactiva.\n\n"
             "Reactiva tu plan para seguir usando CoachKai:\n"
@@ -333,6 +333,9 @@ async def _handle_main(user: dict, tid: int, text: str, media_url: str = None) -
             f"👉 {APP_URL}/dashboard/{tid}?token={token}\n\n"
             "Ahi podes ver tus calorias, macros y comidas del dia."
         )
+
+    if text_lower.startswith("/cancelar") or text_lower == "cancelar suscripcion":
+        return await _cmd_cancelar(user, tid)
 
     if text_lower.startswith("/coach"):
         db.upsert_user(tid, onboarding_step="awaiting_coach")
@@ -594,6 +597,32 @@ def _persist_result(user: dict, tid: int, result: dict, history: list, user_text
 # ------------------------------------------------------------------
 # Commands
 # ------------------------------------------------------------------
+
+async def _cmd_cancelar(user: dict, tid: int) -> str:
+    sub = db.get_subscription(tid)
+    if not sub or sub.get("status") in ("cancelled", "pending_payment"):
+        return "No tenes una suscripcion activa para cancelar."
+
+    mp_id = sub.get("mp_preapproval_id")
+    if mp_id:
+        success = payments.cancel_preapproval(mp_id)
+        if success:
+            db.update_subscription(tid, status="cancelled")
+            return (
+                "Tu suscripcion fue cancelada. "
+                "Podes seguir usando CoachKai hasta que termine tu periodo actual.\n\n"
+                "Si cambias de idea, escribime y te paso el link para reactivar."
+            )
+        else:
+            return "No pude cancelar la suscripcion en este momento. Intenta de nuevo mas tarde."
+
+    # No MP id (e.g. trial only) — just cancel locally
+    db.update_subscription(tid, status="cancelled")
+    return (
+        "Tu suscripcion fue cancelada. "
+        "Si cambias de idea, escribime y te paso el link para reactivar."
+    )
+
 
 async def _cmd_stats(user: dict, tid: int) -> str:
     meals = db.get_today_meals(tid)
