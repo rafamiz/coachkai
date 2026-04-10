@@ -152,7 +152,7 @@ _PERSONALITY_ROASTER = (
 
 def _get_personality(coach_mode: str) -> str:
     """Return the personality prompt snippet for the given coach_mode."""
-    if coach_mode == "roaster":
+    if coach_mode in ("roaster", "challenger"):
         return "\n\n" + _PERSONALITY_ROASTER
     return "\n\n" + _PERSONALITY_MENTOR
 
