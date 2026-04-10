@@ -383,7 +383,19 @@ async def _handle_photo(user: dict, tid: int, text: str, media_url: str) -> str:
         return "No pude analizar la foto. Describe la comida con texto e intenta de nuevo."
 
 
+_DASHBOARD_KEYWORDS = [
+    "dashboard", "mi resumen", "ver mi progreso", "mis stats", "mis estadísticas",
+    "cuanto llevo", "cuánto llevo", "mi progreso", "ver mi plan",
+    "resumen de hoy", "como voy", "cómo voy", "ver dashboard", "mis comidas de hoy"
+]
+
 async def _handle_text(user: dict, tid: int, text: str) -> str:
+    # Auto-send dashboard if user asks about their progress
+    if any(kw in text.lower() for kw in _DASHBOARD_KEYWORDS):
+        token = db.get_or_create_dashboard_token(tid)
+        url = f"https://coachkai-production.up.railway.app/dashboard/{tid}?token={token}"
+        return f"Acá está tu resumen personalizado 📊\n{url}"
+
     try:
         history = db.get_chat_history(tid)
         result = await ai.process_message(
