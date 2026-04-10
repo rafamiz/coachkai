@@ -118,6 +118,7 @@ async def webhook(
     return Response(content=str(resp), media_type="application/xml; charset=utf-8")
 
 
+@app.post("/webhooks/mp")
 @app.post("/webhook/mercadopago")
 async def mp_webhook(request: Request):
     """Receive MercadoPago IPN notifications."""
