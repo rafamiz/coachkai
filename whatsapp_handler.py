@@ -336,7 +336,13 @@ async def _handle_main(user: dict, tid: int, text: str, media_url: str = None) -
             "Ahi podes ver tus calorias, macros y comidas del dia."
         )
 
-    if text_lower.startswith("/cancelar") or text_lower == "cancelar suscripcion":
+    _CANCEL_PHRASES = [
+        "cancelar", "cancelar plan", "cancelar suscripcion", "cancelar suscripción",
+        "quiero cancelar", "baja mi plan", "darme de baja", "dar de baja",
+        "cancela mi plan", "cancela mi suscripcion", "no quiero seguir pagando",
+        "quiero cancelar mi plan", "nono quiero cancelar mi plan pago",
+    ]
+    if text_lower.startswith("/cancelar") or any(p in text_lower for p in _CANCEL_PHRASES):
         return await _cmd_cancelar(user, tid)
 
     if text_lower.startswith("/coach"):
