@@ -22,8 +22,8 @@ MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
 APP_URL = os.environ.get("APP_URL", "https://coachkai-production.up.railway.app")
 
 # Prices in ARS — MercadoPago Argentina only accepts ARS for preapprovals
-MONTHLY_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_MONTHLY", os.environ.get("SUBSCRIPTION_PRICE", "9000")))
-ANNUAL_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_ANNUAL", "59000"))
+MONTHLY_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_MONTHLY", os.environ.get("SUBSCRIPTION_PRICE", "8999")))
+ANNUAL_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_ANNUAL", "58999"))
 
 sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 
