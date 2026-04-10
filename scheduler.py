@@ -110,6 +110,7 @@ def start_scheduler_twilio(sid: str, token: str, from_number: str):
     _scheduler.add_job(send_inactivity_checkin,  "interval", hours=1,   id="inactivity_check")
     _scheduler.add_job(send_macro_nudge, "cron", hour=19, minute=0, id="macro_nudge")
     _scheduler.add_job(check_subscriptions, "interval", hours=6, id="subscription_check")
+    _scheduler.add_job(followup_unpaid_leads, "cron", hour=10, minute=0, id="leads_followup")
     _scheduler.start()
     logger.info("Scheduler started (Twilio mode)")
 
@@ -791,3 +792,81 @@ async def check_subscriptions():
                 logger.error(f"[scheduler] subscription notice error for {tid}: {e}")
     except Exception as e:
         logger.error(f"[scheduler] check_subscriptions error: {e}", exc_info=True)
+
+
+# ------------------------------------------------------------------
+# Follow-up campaigns for unpaid leads
+# ------------------------------------------------------------------
+
+async def followup_unpaid_leads():
+    """Send follow-up messages to leads who completed onboarding but haven't paid."""
+    if not _is_active():
+        return
+    import asyncio
+    from datetime import timedelta
+
+    now = datetime.now(ART)
+
+    try:
+        leads = db.get_unpaid_leads()
+        for lead in leads:
+            phone = lead.get("phone", "")
+            name = lead.get("name", "")
+            created = lead.get("created_at", "")
+            last_contact = lead.get("last_contact")
+
+            if not phone:
+                continue
+
+            # Skip if contacted in the last 24h
+            if last_contact:
+                try:
+                    lc_dt = datetime.fromisoformat(str(last_contact).replace("Z", "+00:00"))
+                    if lc_dt.tzinfo is None:
+                        lc_dt = lc_dt.replace(tzinfo=ART)
+                    if (now - lc_dt.astimezone(ART)).total_seconds() < 86400:
+                        continue
+                except Exception:
+                    pass
+
+            # Calculate days since onboarding
+            try:
+                created_dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=ART)
+                days_since = (now - created_dt.astimezone(ART)).days
+            except Exception:
+                days_since = 0
+
+            link = f"{_APP_URL}/onboarding?phone={phone}"
+
+            if days_since <= 1:
+                msg = (
+                    f"Ey {name}! Te quedo pendiente activar tu prueba gratuita. "
+                    f"Sin cargo hasta el dia 8 👇\n{link}"
+                )
+            elif days_since <= 3:
+                msg = (
+                    f"Ultima chance — tu plan personalizado te esta esperando 🔥\n{link}"
+                )
+            else:
+                continue  # Don't message after day 3
+
+            try:
+                if _twilio_client:
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None,
+                        lambda: _twilio_client.messages.create(
+                            from_=_twilio_from,
+                            to=f"whatsapp:+{phone}",
+                            body=msg,
+                        ),
+                    )
+                    # Update last_contact
+                    db.upsert_lead(phone, last_contact=now.strftime("%Y-%m-%d %H:%M:%S"))
+                    logger.info(f"[scheduler] Sent lead followup to {phone} (day {days_since})")
+            except Exception as e:
+                logger.error(f"[scheduler] Lead followup error for {phone}: {e}")
+    except Exception as e:
+        logger.error(f"[scheduler] followup_unpaid_leads error: {e}", exc_info=True)

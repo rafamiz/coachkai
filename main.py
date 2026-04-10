@@ -74,6 +74,10 @@ async def onboarding_complete(request: Request):
     if coach_mode == "challenger":
         coach_mode = "roaster"
 
+    # Update leads table with onboarding data
+    db.upsert_lead(phone, name=data.get("name"), goal=data.get("goal"),
+                   coach_mode=coach_mode, onboarding_complete=1)
+
     db.upsert_user(
         tid,
         phone=phone,
@@ -171,6 +175,8 @@ async def subscription_checkout(phone: str = "", email: str = "", plan: str = "m
     if not user:
         return {"ok": False, "error": "user not found"}
     tid = user["telegram_id"]
+    # Track payment attempt in leads
+    db.upsert_lead(phone, payment_attempted=1)
     url = payments.get_checkout_url(tid, email, plan=plan)
     if url:
         return {"ok": True, "checkout_url": url}

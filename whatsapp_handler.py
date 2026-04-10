@@ -39,6 +39,8 @@ def _phone_to_tid(phone: str) -> int:
 def get_or_create_user(numero: str) -> dict:
     user = db.get_user_by_phone(numero)
     if user is None:
+        # Create lead record for tracking; user record is created later
+        db.upsert_lead(numero, source="whatsapp")
         tid = _phone_to_tid(numero)
         db.upsert_user(tid, phone=numero)
         user = db.get_user_by_phone(numero)

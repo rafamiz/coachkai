@@ -303,6 +303,22 @@ def init_db():
             )
         """)
 
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS leads (
+                id SERIAL PRIMARY KEY,
+                phone TEXT UNIQUE NOT NULL,
+                name TEXT,
+                goal TEXT,
+                coach_mode TEXT,
+                onboarding_complete INTEGER DEFAULT 0,
+                payment_attempted INTEGER DEFAULT 0,
+                paid INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                last_contact TIMESTAMP,
+                source TEXT DEFAULT 'whatsapp'
+            )
+        """)
+
     else:
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -499,6 +515,22 @@ def init_db():
                 current_period_end TEXT,
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS leads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT UNIQUE NOT NULL,
+                name TEXT,
+                goal TEXT,
+                coach_mode TEXT,
+                onboarding_complete INTEGER DEFAULT 0,
+                payment_attempted INTEGER DEFAULT 0,
+                paid INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                last_contact TEXT,
+                source TEXT DEFAULT 'whatsapp'
             )
         """)
 
@@ -1313,3 +1345,65 @@ def get_expiring_soon(days: int = 2) -> list:
     rows = c.fetchall()
     _release(conn)
     return _rows(rows)
+
+
+# --- Leads ---
+
+def upsert_lead(phone: str, **kwargs):
+    """Insert or update a lead by phone number."""
+    phone = normalize_phone(phone)
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT id FROM leads WHERE phone = ?"), (phone,))
+    row = c.fetchone()
+    if row:
+        if kwargs:
+            sets = ", ".join(f"{k} = ?" for k in kwargs)
+            vals = list(kwargs.values()) + [phone]
+            c.execute(_q(f"UPDATE leads SET {sets} WHERE phone = ?"), vals)
+    else:
+        c.execute(_q("INSERT INTO leads (phone) VALUES (?)"), (phone,))
+        if kwargs:
+            sets = ", ".join(f"{k} = ?" for k in kwargs)
+            vals = list(kwargs.values()) + [phone]
+            c.execute(_q(f"UPDATE leads SET {sets} WHERE phone = ?"), vals)
+    conn.commit()
+    _release(conn)
+
+
+def get_lead(phone: str):
+    """Get a lead by phone number."""
+    phone = normalize_phone(phone)
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("SELECT * FROM leads WHERE phone = ?"), (phone,))
+    row = c.fetchone()
+    _release(conn)
+    return dict(row) if row else None
+
+
+def get_unpaid_leads() -> list:
+    """Get leads who completed onboarding but haven't paid."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute("SELECT * FROM leads WHERE onboarding_complete = 1 AND paid = 0")
+    rows = c.fetchall()
+    _release(conn)
+    return _rows(rows)
+
+
+def promote_lead_to_user(phone: str):
+    """Move a lead to the users table after payment. Marks lead as paid."""
+    phone = normalize_phone(phone)
+    lead = get_lead(phone)
+    if not lead:
+        return
+    import hashlib
+    tid = int(hashlib.sha256(phone.encode()).hexdigest(), 16) % (2**31 - 1) + 1
+    upsert_user(tid, phone=phone, name=lead.get("name"),
+                goal=lead.get("goal"), coach_mode=lead.get("coach_mode"))
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(_q("UPDATE leads SET paid = 1 WHERE phone = ?"), (phone,))
+    conn.commit()
+    _release(conn)
