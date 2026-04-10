@@ -272,6 +272,7 @@ async def _handle_onboarding(user: dict, tid: int, step, text: str) -> str:
             "Comandos:\n"
             "/stats - resumen del dia\n"
             "/plan - ver tu plan\n"
+            "/dashboard - ver tu dashboard\n"
             "/coach - cambiar tipo de coach\n"
             "/reset - empezar de nuevo"
         )
@@ -324,6 +325,14 @@ async def _handle_main(user: dict, tid: int, text: str, media_url: str = None) -
 
     if text_lower.startswith("/plan"):
         return await _cmd_plan(user)
+
+    if text_lower.startswith("/dashboard"):
+        token = db.get_or_create_dashboard_token(tid)
+        return (
+            "Tu dashboard personal:\n"
+            f"👉 {APP_URL}/dashboard/{tid}?token={token}\n\n"
+            "Ahi podes ver tus calorias, macros y comidas del dia."
+        )
 
     if text_lower.startswith("/coach"):
         db.upsert_user(tid, onboarding_step="awaiting_coach")
