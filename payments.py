@@ -21,9 +21,9 @@ _BA = pytz.timezone("America/Argentina/Buenos_Aires")
 MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
 APP_URL = os.environ.get("APP_URL", "https://coachkai-production.up.railway.app")
 
-# Prices in USD — adjust as needed
-MONTHLY_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_MONTHLY", os.environ.get("SUBSCRIPTION_PRICE", "9")))
-ANNUAL_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_ANNUAL", "59"))
+# Prices in ARS — MercadoPago Argentina only accepts ARS for preapprovals
+MONTHLY_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_MONTHLY", os.environ.get("SUBSCRIPTION_PRICE", "9000")))
+ANNUAL_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_ANNUAL", "59000"))
 
 sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 
@@ -62,7 +62,7 @@ def create_preapproval(telegram_id: int, payer_email: str, plan: str = "monthly"
             "frequency": frequency,
             "frequency_type": frequency_type,
             "transaction_amount": amount,
-            "currency_id": "USD",
+            "currency_id": "ARS",
             "start_date": start_date,
             "end_date": end_date,
         },
