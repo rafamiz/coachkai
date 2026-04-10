@@ -611,6 +611,13 @@ async def _cmd_cancelar(user: dict, tid: int) -> str:
     if not sub or sub.get("status") in ("cancelled", "pending_payment"):
         return "No tenes una suscripcion activa para cancelar."
 
+    return (
+        "Para cancelar tu suscripcion, hacelo directamente desde MercadoPago:\n\n"
+        "👉 https://www.mercadopago.com.ar/subscriptions\n\n"
+        "Entrá con tu cuenta, buscá CoachKai y cancelá desde ahí. "
+        "Tu acceso se mantiene hasta que venza el periodo actual."
+    )
+
     mp_id = sub.get("mp_preapproval_id")
     if mp_id:
         success = payments.cancel_preapproval(mp_id)
