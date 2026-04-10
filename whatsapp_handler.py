@@ -377,7 +377,7 @@ async def _handle_photo(user: dict, tid: int, text: str, media_url: str) -> str:
             coach_mode=user.get("coach_mode", "mentor"),
         )
         _persist_result(user, tid, result, history, text or "foto de comida")
-        return _extract_reply(result)
+        return _extract_reply(result, tid, user)
     except Exception as e:
         logger.error(f"[handler] photo process error for {tid}: {e}")
         return "No pude analizar la foto. Describe la comida con texto e intenta de nuevo."
@@ -405,7 +405,7 @@ async def _handle_text(user: dict, tid: int, text: str) -> str:
             coach_mode=user.get("coach_mode", "mentor"),
         )
         _persist_result(user, tid, result, history, text)
-        return _extract_reply(result)
+        return _extract_reply(result, tid, user)
     except Exception as e:
         logger.error(f"[handler] process_message error for {tid}: {e}", exc_info=True)
         return "Hubo un error procesando tu mensaje. Intenta de nuevo."
@@ -415,9 +415,62 @@ async def _handle_text(user: dict, tid: int, text: str) -> str:
 # Persistence helpers
 # ------------------------------------------------------------------
 
-def _extract_reply(result: dict) -> str:
+def _daily_goal(user: dict) -> int:
+    """Estimate daily calorie goal based on user profile (Mifflin-St Jeor male)."""
+    weight = user.get("weight_kg") or 70
+    height = user.get("height_cm") or 170
+    age = user.get("age") or 25
+    goal = user.get("goal", "maintain")
+    activity = user.get("activity_level", "moderate")
+    bmr = 10 * weight + 6.25 * height - 5 * age + 5
+    activity_mult = {
+        "sedentary": 1.2, "light": 1.375, "lightly_active": 1.375,
+        "moderate": 1.55, "active": 1.725, "very_active": 1.9,
+    }
+    tdee = bmr * activity_mult.get(activity, 1.55)
+    if goal == "lose_weight":
+        tdee -= 400
+    elif goal == "gain_muscle":
+        tdee += 300
+    return int(tdee)
+
+
+def _format_meal_reply(result: dict, tid: int, user: dict) -> str:
+    """Build a formatted meal reply with macros and daily progress."""
+    meal = result.get("meal", {})
+    detected = (
+        meal.get("detected_food")
+        or meal.get("description")
+        or meal.get("detected", "comida")
+    )
+    calories = int(meal.get("calories_est") or meal.get("calories", 0) or 0)
+    proteins = float(meal.get("proteins_g", 0) or 0)
+    carbs = float(meal.get("carbs_g", 0) or 0)
+    fats = float(meal.get("fats_g", 0) or 0)
+
+    today_meals = db.get_today_meals(tid)
+    total_cal = sum(m.get("calories_est", 0) or 0 for m in today_meals)
+    daily = user.get("daily_calories") or _daily_goal(user)
+    remaining = max(0, daily - total_cal)
+
+    tip = result.get("tip") or meal.get("tip", "")
+
+    lines = [
+        f"✅ {detected} — ~{calories} kcal",
+        f"🥩 {proteins:.0f}g prot | 🍞 {carbs:.0f}g carbos | 🧈 {fats:.0f}g grasa",
+        f"📊 Hoy: {total_cal} / {daily} kcal (te quedan ~{remaining})",
+    ]
+    if tip:
+        lines.append(f"\n💬 {tip}")
+
+    return "\n".join(lines)
+
+
+def _extract_reply(result: dict, tid: int = None, user: dict = None) -> str:
     rtype = result.get("type", "text")
     if rtype == "meal":
+        if tid is not None and user is not None:
+            return _format_meal_reply(result, tid, user)
         return result.get("reply") or "Comida registrada."
     if rtype == "workout":
         return result.get("reply") or "Ejercicio registrado."
@@ -530,7 +583,7 @@ def _persist_result(user: dict, tid: int, result: dict, history: list, user_text
         if content:
             db.save_memory(tid, content, category)
 
-    reply_text = _extract_reply(result)
+    reply_text = _extract_reply(result, tid, user)
     new_history = history + [
         {"role": "user", "content": user_text},
         {"role": "assistant", "content": reply_text},
