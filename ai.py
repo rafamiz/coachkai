@@ -67,7 +67,7 @@ def get_client():
 
 
 
-MODEL_TEXT = "claude-sonnet-4-5"
+MODEL_TEXT = "claude-haiku-4-5"
 MODEL_VISION = "claude-sonnet-4-5"  # only for photos
 
 
