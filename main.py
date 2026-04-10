@@ -3,6 +3,9 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, Response
 from twilio.twiml.messaging_response import MessagingResponse
@@ -105,7 +108,7 @@ async def webhook(
     reply = await handle_message(numero, Body, MediaUrl0 if has_media else None)
     resp = MessagingResponse()
     resp.message(reply)
-    return Response(content=str(resp), media_type="application/xml")
+    return Response(content=str(resp), media_type="application/xml; charset=utf-8")
 
 
 @app.post("/webhook/mercadopago")
