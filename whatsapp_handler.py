@@ -211,7 +211,7 @@ async def _handle_onboarding(user: dict, tid: int, step, text: str) -> str:
 
         try:
             plan = await ai.generate_meal_plan(fresh_user or user, coach_mode=coach_mode)
-            plan_text = plan.get("text", "") if isinstance(plan, dict) else str(plan)
+            plan_text = _format_plan(plan) if isinstance(plan, dict) else str(plan)
         except Exception as e:
             logger.warning(f"[onboarding] meal plan error: {e}")
             plan_text = ""
@@ -241,20 +241,19 @@ async def _handle_onboarding(user: dict, tid: int, step, text: str) -> str:
 async def _handle_main(user: dict, tid: int, text: str, media_url: str = None) -> str:
     text_lower = text.lower()
 
-    # First message after webapp onboarding — send welcome
-    meals = db.get_today_meals(tid)
-    all_meals = db.get_weekly_meals(tid) if not meals else meals
-    if not all_meals and text_lower not in ("/stats", "/plan", "/coach", "/reset", "/start"):
+    # First message after onboarding — send welcome once
+    if user.get("onboarding_step") == "done" and text_lower not in ("/stats", "/plan", "/coach", "/reset", "/start"):
         name = user.get("name", "")
         coach_mode = user.get("coach_mode", "mentor")
         coach_mode_name = "El Mentor" if coach_mode == "mentor" else "El Challenger"
+        db.upsert_user(tid, onboarding_step="welcomed")
+        user["onboarding_step"] = "welcomed"  # update in-memory to prevent re-trigger
         welcome = (
             f"¡Bienvenido/a {name}! 🎉 Tu perfil está listo.\n"
             f"Soy {coach_mode_name}, tu coach personal.\n"
             "Podés empezar mandándome una foto de tu próxima comida o texto de lo que comiste."
         )
         if text and not text_lower.startswith("/"):
-            # Process their message too
             reply = await _handle_text(user, tid, text)
             return f"{welcome}\n\n{reply}"
         if media_url:
@@ -266,7 +265,7 @@ async def _handle_main(user: dict, tid: int, text: str, media_url: str = None) -
     if user.get("onboarding_step") == "awaiting_coach":
         coach_mode = COACH_MODES.get(text.strip())
         if coach_mode:
-            db.upsert_user(tid, coach_mode=coach_mode, onboarding_step="done")
+            db.upsert_user(tid, coach_mode=coach_mode, onboarding_step="welcomed")
             label = "Mentor" if coach_mode == "mentor" else "Roaster"
             return f"Coach cambiado a {label}."
         return "Responde con 1 o 2:\n1 Mentor\n2 Roaster"
@@ -365,7 +364,9 @@ def _extract_reply(result: dict) -> str:
 
 
 def _persist_result(user: dict, tid: int, result: dict, history: list, user_text: str):
-    if result.get("type") == "meal":
+    rtype = result.get("type", "text")
+
+    if rtype == "meal":
         meal = result.get("meal", {})
         if meal:
             detected = (
@@ -397,6 +398,68 @@ def _persist_result(user: dict, tid: int, result: dict, history: list, user_text
                 fats_g=float(meal.get("fats_g", 0) or 0),
                 eaten_at=eaten_at,
             )
+
+    elif rtype == "workout":
+        wo = result.get("workout", {})
+        if wo:
+            db.add_workout(
+                user_id=user["id"],
+                telegram_id=tid,
+                workout_type=wo.get("workout_type", "other"),
+                description=str(wo.get("description", ""))[:500],
+                duration_min=int(wo.get("duration_min", 0) or 0),
+                calories_burned=int(wo.get("calories_burned", 0) or 0),
+                intensity=wo.get("intensity", "moderate"),
+                distance_km=float(wo.get("distance_km", 0) or 0) or None,
+                notes=wo.get("notes"),
+            )
+
+    elif rtype == "delete_meal":
+        meal_ids = result.get("meal_ids", [])
+        for mid in meal_ids:
+            try:
+                db.delete_meal_by_id(tid, int(mid))
+            except Exception as e:
+                logger.warning(f"[persist] delete_meal_by_id({mid}) failed: {e}")
+
+    elif rtype == "identity_update":
+        update = result.get("update", {})
+        if update:
+            kwargs = {}
+            if update.get("identity_markdown"):
+                db.save_profile_text(tid, update["identity_markdown"])
+            if update.get("weight_kg") is not None:
+                kwargs["weight_kg"] = update["weight_kg"]
+            if update.get("goal"):
+                kwargs["goal"] = update["goal"]
+            if update.get("activity_level"):
+                kwargs["activity_level"] = update["activity_level"]
+            if update.get("training_schedule"):
+                kwargs["training_schedule"] = update["training_schedule"]
+            if update.get("daily_calories") is not None:
+                kwargs["daily_calories"] = update["daily_calories"]
+            if kwargs:
+                db.upsert_user(tid, **kwargs)
+
+    elif rtype == "set_reminder":
+        time_str = result.get("time_str", "")
+        message = result.get("message", "")
+        if time_str and message:
+            try:
+                now = datetime.now(_BA_TZ)
+                h, m = map(int, time_str.split(":"))
+                remind_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                if remind_dt <= now:
+                    remind_dt += timedelta(days=1)
+                db.save_reminder(tid, remind_dt.strftime("%Y-%m-%d %H:%M:%S"), message)
+            except Exception as e:
+                logger.warning(f"[persist] save_reminder failed: {e}")
+
+    elif rtype == "save_memory":
+        content = result.get("content", "")
+        category = result.get("category", "general")
+        if content:
+            db.save_memory(tid, content, category)
 
     reply_text = _extract_reply(result)
     new_history = history + [
@@ -430,11 +493,32 @@ async def _cmd_stats(user: dict, tid: int) -> str:
     return "\n".join(lines)
 
 
+def _format_plan(plan: dict) -> str:
+    """Format a meal plan dict into readable text."""
+    lines = []
+    if plan.get("summary"):
+        lines.append(plan["summary"])
+    if plan.get("calories"):
+        lines.append(f"\nObjetivo: {plan['calories']} kcal | P: {plan.get('protein_g', 0)}g | C: {plan.get('carbs_g', 0)}g | G: {plan.get('fat_g', 0)}g")
+    for label, key in [("Desayuno", "breakfasts"), ("Almuerzo", "lunches"), ("Cena", "dinners"), ("Snacks", "snacks")]:
+        items = plan.get(key, [])
+        if items:
+            lines.append(f"\n{label}:")
+            for item in items:
+                lines.append(f"  - {item}")
+    if plan.get("tips"):
+        lines.append("\nTips:")
+        for tip in plan["tips"]:
+            lines.append(f"  - {tip}")
+    return "\n".join(lines) if lines else ""
+
+
 async def _cmd_plan(user: dict) -> str:
     try:
         plan = await ai.generate_meal_plan(user, coach_mode=user.get("coach_mode", "mentor"))
         if isinstance(plan, dict):
-            return plan.get("text", "No pude generar el plan.")
+            text = _format_plan(plan)
+            return text or "No pude generar el plan."
         return str(plan)
     except Exception as e:
         logger.error(f"[handler] /plan error: {e}")
