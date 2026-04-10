@@ -611,6 +611,13 @@ async def _cmd_cancelar(user: dict, tid: int) -> str:
     if not sub or sub.get("status") in ("cancelled", "pending_payment"):
         return "No tenes una suscripcion activa para cancelar."
 
+    if sub.get("status") == "trial":
+        return (
+            "Estás en tu periodo de prueba gratuito. No se te va a cobrar nada si no hacés nada.\n\n"
+            "Si igual querés cancelar para que no te cobren al día 8, hacelo desde MercadoPago:\n"
+            "👉 https://www.mercadopago.com.ar/subscriptions"
+        )
+
     return (
         "Para cancelar tu suscripcion, hacelo directamente desde MercadoPago:\n\n"
         "👉 https://www.mercadopago.com.ar/subscriptions\n\n"
