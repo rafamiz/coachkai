@@ -21,16 +21,18 @@ _BA = pytz.timezone("America/Argentina/Buenos_Aires")
 MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
 APP_URL = os.environ.get("APP_URL", "https://coachkai-production.up.railway.app")
 
-# Monthly price in ARS — adjust as needed
-SUBSCRIPTION_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE", "9999.00"))
+# Prices in USD — adjust as needed
+MONTHLY_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_MONTHLY", os.environ.get("SUBSCRIPTION_PRICE", "9")))
+ANNUAL_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_ANNUAL", "59"))
 
 sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 
 
-def create_preapproval(telegram_id: int, payer_email: str) -> dict | None:
+def create_preapproval(telegram_id: int, payer_email: str, plan: str = "monthly") -> dict | None:
     """
     Create a MercadoPago preapproval (recurring subscription) with 7-day free trial.
     Returns the full MP response including init_point (checkout URL).
+    plan: "monthly" or "annual"
     """
     if not sdk:
         logger.error("[payments] MP_ACCESS_TOKEN not configured")
@@ -39,17 +41,30 @@ def create_preapproval(telegram_id: int, payer_email: str) -> dict | None:
     now = datetime.now(_BA)
     start_date = (now + timedelta(days=7)).isoformat()
 
+    if plan == "annual":
+        frequency = 12
+        frequency_type = "months"
+        amount = ANNUAL_PRICE
+        reason = "CoachKai - Plan Anual"
+        end_date = (now + timedelta(days=730)).isoformat()
+    else:
+        frequency = 1
+        frequency_type = "months"
+        amount = MONTHLY_PRICE
+        reason = "CoachKai - Plan Mensual"
+        end_date = (now + timedelta(days=365)).isoformat()
+
     preapproval_data = {
-        "reason": "CoachKai - Plan Mensual",
+        "reason": reason,
         "external_reference": str(telegram_id),
         "payer_email": payer_email,
         "auto_recurring": {
-            "frequency": 1,
-            "frequency_type": "months",
-            "transaction_amount": SUBSCRIPTION_PRICE,
-            "currency_id": "ARS",
+            "frequency": frequency,
+            "frequency_type": frequency_type,
+            "transaction_amount": amount,
+            "currency_id": "USD",
             "start_date": start_date,
-            "end_date": (now + timedelta(days=365)).isoformat(),
+            "end_date": end_date,
         },
         "back_url": f"{APP_URL}/subscription/success?tid={telegram_id}",
         "status": "pending",
@@ -77,9 +92,9 @@ def create_preapproval(telegram_id: int, payer_email: str) -> dict | None:
         return None
 
 
-def get_checkout_url(telegram_id: int, payer_email: str) -> str | None:
+def get_checkout_url(telegram_id: int, payer_email: str, plan: str = "monthly") -> str | None:
     """Create a preapproval and return the checkout URL (init_point)."""
-    response = create_preapproval(telegram_id, payer_email)
+    response = create_preapproval(telegram_id, payer_email, plan=plan)
     if response:
         return response.get("init_point")
     return None

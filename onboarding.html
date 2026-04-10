@@ -509,7 +509,10 @@ input::placeholder { color: #4a4a6a; }
       </div>
     </div>
     <div class="gap-md"></div>
+    <input type="text" id="emailInput" placeholder="tu@email.com" style="font-size:1rem;max-width:340px;" enterkeyhint="done">
+    <div class="gap-sm"></div>
     <button class="btn btn-primary" id="ctaBtn" onclick="completeOnboarding()">Empezar prueba gratuita →</button>
+    <div id="paywallError" style="color:#ef4444;font-size:0.85rem;text-align:center;margin-top:0.5rem;display:none"></div>
     <div class="gap-sm"></div>
     <div class="paywall-trust">🔒 Pago seguro — cancelá en cualquier momento</div>
     <div class="gap-sm"></div>
@@ -635,7 +638,22 @@ function pickPlan(plan) {
 }
 
 async function completeOnboarding() {
+  const email = document.getElementById('emailInput').value.trim();
+  const errEl = document.getElementById('paywallError');
+  errEl.style.display = 'none';
+
+  if (!email || !email.includes('@')) {
+    errEl.textContent = 'Ingresá tu email para continuar';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('ctaBtn');
+  btn.textContent = 'Procesando...';
+  btn.disabled = true;
+
   try {
+    // Save onboarding data first
     await fetch('/api/onboarding/complete', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -650,13 +668,26 @@ async function completeOnboarding() {
         coach_mode: data.coach || 'mentor',
       })
     });
+
+    // Create MP checkout
+    const res = await fetch('/api/subscription/checkout?phone=' + encodeURIComponent(data.phone) + '&email=' + encodeURIComponent(email) + '&plan=' + selectedPlan);
+    const json = await res.json();
+
+    if (json.ok && json.checkout_url) {
+      window.location.href = json.checkout_url;
+    } else {
+      errEl.textContent = json.error || 'Error al procesar. Intentá de nuevo.';
+      errEl.style.display = 'block';
+      btn.textContent = 'Empezar prueba gratuita →';
+      btn.disabled = false;
+    }
   } catch(e) {
-    console.error('onboarding save failed', e);
+    console.error('checkout failed', e);
+    errEl.textContent = 'Error de conexión. Intentá de nuevo.';
+    errEl.style.display = 'block';
+    btn.textContent = 'Empezar prueba gratuita →';
+    btn.disabled = false;
   }
-  const msg = selectedPlan === 'annual'
-    ? 'Hola! Quiero el plan anual de CoachKai'
-    : 'Hola! Quiero el plan mensual de CoachKai';
-  window.open('https://wa.me/14155238886?text=' + encodeURIComponent(msg), '_blank');
 }
 
 function showResults() {
