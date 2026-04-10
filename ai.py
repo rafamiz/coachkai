@@ -67,7 +67,8 @@ def get_client():
 
 
 
-MODEL = "claude-haiku-4-5"
+MODEL_TEXT = "claude-3-5-haiku-20241022"
+MODEL_VISION = "claude-sonnet-4-5"  # only for photos
 
 
 
@@ -501,7 +502,7 @@ async def _ask(messages: list, system: str = SYSTEM_BASE) -> str:
 
 
 
-            model=MODEL,
+            model=MODEL_TEXT,
 
 
 
@@ -601,7 +602,7 @@ async def intake_turn(history: list, user_message: str) -> dict:
 
 
 
-            model=MODEL,
+            model=MODEL_TEXT,
 
 
 
@@ -760,7 +761,7 @@ async def force_extract_profile(history: list) -> dict:
             "Only output valid JSON, nothing else."
         )
         resp = await client.messages.create(
-            model=MODEL,
+            model=MODEL_TEXT,
             max_tokens=800,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -2322,7 +2323,7 @@ async def process_message(
 
 
 
-            model=MODEL,
+            model=MODEL_VISION if photo_path else MODEL_TEXT,
 
 
 
@@ -2956,7 +2957,7 @@ async def generate_checkin_message(user: dict, trigger: str, memories: list = No
     client = get_client()
     import anthropic
     resp = await client.messages.create(
-        model=MODEL,
+        model=MODEL_TEXT,
         max_tokens=150,
         system=system,
         messages=[{"role": "user", "content": prompt}],

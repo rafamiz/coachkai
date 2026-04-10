@@ -36,7 +36,7 @@ Both share the same core: `db.py`, `ai.py`, `scheduler.py`, `handlers.py`, `web.
 - Python 3.10+
 - python-telegram-bot v20+ (async polling)
 - FastAPI + Twilio (WhatsApp mode)
-- Anthropic Claude API (`claude-haiku-4-5`) -- meal analysis, vision, chat, onboarding
+- Anthropic Claude API (`claude-3-5-haiku-20241022` for text, `claude-sonnet-4-5` for photos) -- meal analysis, vision, chat, onboarding
 - APScheduler AsyncIOScheduler -- background jobs
 - PostgreSQL (Railway, via `DATABASE_URL` env var) or SQLite fallback (`nutribot.db`)
 - psycopg2 (Postgres), sqlite3 (SQLite)
@@ -325,9 +325,10 @@ Episodic memories (facts, preferences, events) per user.
 
 | Constant | Value | Notes |
 |----------|-------|-------|
-| `MODEL` | `"claude-haiku-4-5"` | Used for all API calls |
-| `_COST_INPUT` | $0.80/MTok | Haiku pricing |
-| `_COST_OUTPUT` | $4.00/MTok | Haiku pricing |
+| `MODEL_TEXT` | `"claude-3-5-haiku-20241022"` | Text messages, food logging, follow-ups |
+| `MODEL_VISION` | `"claude-sonnet-4-5"` | Photo analysis only |
+| `_COST_INPUT` | $0.80/MTok | Haiku pricing (approx) |
+| `_COST_OUTPUT` | $4.00/MTok | Haiku pricing (approx) |
 
 ### Cost tracking
 
