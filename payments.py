@@ -66,7 +66,7 @@ def create_preapproval(telegram_id: int, payer_email: str, plan: str = "monthly"
             "start_date": start_date,
             "end_date": end_date,
         },
-        "back_url": f"{APP_URL}/subscription/success?tid={telegram_id}",
+        "back_url": f"https://coachkai-production.up.railway.app/subscription/success?tid={telegram_id}",
         "status": "pending",
     }
 
