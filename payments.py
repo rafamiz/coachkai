@@ -28,7 +28,7 @@ ANNUAL_PRICE = float(os.environ.get("SUBSCRIPTION_PRICE_ANNUAL", "58999"))
 sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 
 
-def create_preapproval(telegram_id: int, payer_email: str, plan: str = "monthly") -> dict | None:
+def create_preapproval(telegram_id: int, payer_email: str = "", plan: str = "monthly") -> dict | None:
     """
     Create a MercadoPago preapproval (recurring subscription) with 7-day free trial.
     Returns the full MP response including init_point (checkout URL).
@@ -57,7 +57,6 @@ def create_preapproval(telegram_id: int, payer_email: str, plan: str = "monthly"
     preapproval_data = {
         "reason": reason,
         "external_reference": str(telegram_id),
-        "payer_email": payer_email,
         "auto_recurring": {
             "frequency": frequency,
             "frequency_type": frequency_type,
@@ -77,11 +76,10 @@ def create_preapproval(telegram_id: int, payer_email: str, plan: str = "monthly"
 
         if status_code in (200, 201):
             mp_id = response.get("id", "")
-            db.update_subscription(
-                telegram_id,
-                mp_preapproval_id=mp_id,
-                mp_payer_email=payer_email,
-            )
+            update_kwargs = {"mp_preapproval_id": mp_id}
+            if payer_email:
+                update_kwargs["mp_payer_email"] = payer_email
+            db.update_subscription(telegram_id, **update_kwargs)
             logger.info(f"[payments] Preapproval created for tid={telegram_id}: {mp_id}")
             return response
         else:
@@ -92,7 +90,7 @@ def create_preapproval(telegram_id: int, payer_email: str, plan: str = "monthly"
         return None
 
 
-def get_checkout_url(telegram_id: int, payer_email: str, plan: str = "monthly") -> str | None:
+def get_checkout_url(telegram_id: int, payer_email: str = "", plan: str = "monthly") -> str | None:
     """Create a preapproval and return the checkout URL (init_point)."""
     response = create_preapproval(telegram_id, payer_email, plan=plan)
     if response:

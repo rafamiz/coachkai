@@ -170,8 +170,8 @@ def subscription_success(tid: str = ""):
 async def subscription_checkout(phone: str = "", email: str = "", plan: str = "monthly"):
     """Generate a MercadoPago checkout URL for a user."""
     phone = db.normalize_phone(phone)
-    if not phone or not email:
-        return {"ok": False, "error": "phone and email required"}
+    if not phone:
+        return {"ok": False, "error": "phone required"}
     user = db.get_user_by_phone(phone)
     if not user:
         return {"ok": False, "error": "user not found"}
