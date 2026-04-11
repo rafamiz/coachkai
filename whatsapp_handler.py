@@ -54,6 +54,7 @@ async def download_media_to_file(url: str) -> str:
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.get(url, auth=auth, follow_redirects=True)
         content_type = r.headers.get("content-type", "image/jpeg")
+        logger.info(f"[download] url={url}, status={r.status_code}, content_type={content_type}, size={len(r.content)} bytes")
         ext = content_type.split("/")[-1].split(";")[0].strip().lower()
         if ext not in ("jpeg", "jpg", "png", "webp"):
             ext = "jpg"

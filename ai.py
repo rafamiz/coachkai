@@ -2240,41 +2240,30 @@ async def process_message(
 
 
         try:
-
-
-
             with open(photo_path, "rb") as f:
+                raw = f.read()
 
-
-
-                img_data = base64.standard_b64encode(f.read()).decode("utf-8")
-
-
+            import logging as _log
+            _logger = _log.getLogger(__name__)
+            _logger.info(f"[ai] photo file: {photo_path}, size={len(raw)} bytes, first4={raw[:4].hex()}")
 
             ext = photo_path.rsplit(".", 1)[-1].lower()
-
-
-
             media_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
-
-
-
                           "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
 
+            # Detect actual format from magic bytes
+            if raw[:3] == b'\xff\xd8\xff':
+                media_type = "image/jpeg"
+            elif raw[:8] == b'\x89PNG\r\n\x1a\n':
+                media_type = "image/png"
+            elif raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
+                media_type = "image/webp"
+            _logger.info(f"[ai] detected media_type={media_type}")
 
-
+            img_data = base64.standard_b64encode(raw).decode("utf-8")
             content = [
-
-
-
                 {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}},
-
-
-
                 {"type": "text", "text": text or "Registra esta comida."},
-
-
-
             ]
 
 
