@@ -65,6 +65,8 @@ def _to_gemini_tool(anthropic_tool: dict) -> dict:
 
 def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
     """Convert Anthropic-style messages to Gemini contents format."""
+    import logging as _log
+    _logger = _log.getLogger(__name__)
     contents = []
     for msg in messages:
         role = "user" if msg["role"] == "user" else "model"
@@ -80,11 +82,17 @@ def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
                         parts.append(types.Part.from_text(text=block["text"]))
                     elif block.get("type") == "image":
                         src = block.get("source", {})
-                        import base64 as _b64
-                        raw_bytes = _b64.b64decode(src.get("data", ""))
-                        parts.append(types.Part.from_bytes(
-                            data=raw_bytes,
-                            mime_type=src.get("media_type", "image/jpeg"),
+                        b64_data = src.get("data", "")
+                        mime = src.get("media_type", "image/jpeg")
+                        # Normalize mime type - reject non-image types
+                        if mime.startswith("application/"):
+                            mime = "image/jpeg"
+                        _logger.info(f"[ai] image part: mime={mime}, b64_len={len(b64_data)}")
+                        parts.append(types.Part(
+                            inline_data=types.Blob(
+                                mime_type=mime,
+                                data=b64_data,
+                            )
                         ))
             if parts:
                 contents.append(types.Content(role=role, parts=parts))
