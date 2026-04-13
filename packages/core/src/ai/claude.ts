@@ -60,8 +60,13 @@ export async function analyzeMessage(
 
   messages.push({ role: 'user', content: userContent });
 
+  // Use Sonnet for images (vision), Haiku for text-only (10x cheaper)
+  const model = imageBase64
+    ? 'claude-sonnet-4-20250514'
+    : 'claude-haiku-4-5-20241022';
+
   const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model,
     max_tokens: 1024,
     temperature: 0.3,
     system: buildSystemPrompt(userContext),
