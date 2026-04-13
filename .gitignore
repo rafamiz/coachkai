@@ -1,11 +1,11 @@
+.env
+.env.local
+.env.*.local
+__pycache__/
+*.pyc
+*.db
 node_modules/
 .next/
 dist/
 .turbo/
-.env
-.env.local
-.env.*.local
 *.tsbuildinfo
-*.db
-__pycache__/
-*.pyc
