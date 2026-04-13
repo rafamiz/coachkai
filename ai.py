@@ -1,21 +1,13 @@
 import pytz
 import base64
-
-
-
 import os
-
-
-
-import anthropic
-
+import google.generativeai as genai
 
 
 
 
 
-
-_client = None
+_configured = False
 
 
 
@@ -25,37 +17,14 @@ _client = None
 
 
 
-
-
-def get_client():
-
-
-
-    global _client
-
-
-
-    if _client is None:
-
-
-
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
-
-
-
+def _ensure_configured():
+    global _configured
+    if not _configured:
+        key = os.environ.get("GEMINI_API_KEY", "")
         import logging
-
-
-
-        logging.getLogger(__name__).info(f"[ai] API key loaded: {'YES (len=' + str(len(key)) + ')' if key else 'NO - KEY MISSING'}")
-
-
-
-        _client = anthropic.AsyncAnthropic(api_key=key)
-
-
-
-    return _client
+        logging.getLogger(__name__).info(f"[ai] Gemini API key loaded: {'YES (len=' + str(len(key)) + ')' if key else 'NO - KEY MISSING'}")
+        genai.configure(api_key=key)
+        _configured = True
 
 
 
@@ -67,28 +36,111 @@ def get_client():
 
 
 
-MODEL_TEXT = "claude-haiku-4-5-20251001"
-MODEL_VISION = "claude-sonnet-4-5-20250929"  # only for photos
+MODEL = "gemini-2.0-flash"
 
 
 
 
 
 
-
-# Cost tracking (Haiku pricing: $0.80/MTok input, $4.00/MTok output)
-
-
-
-_COST_INPUT = 0.80 / 1_000_000
-
-
-
-_COST_OUTPUT = 4.00 / 1_000_000
+# Cost tracking (Gemini 2.0 Flash: $0.10/MTok input, $0.40/MTok output)
+_COST_INPUT = 0.10 / 1_000_000
+_COST_OUTPUT = 0.40 / 1_000_000
 
 
 
 _turn_cost: float = 0.0
+
+
+def _to_gemini_tool(anthropic_tool: dict) -> dict:
+    """Convert an Anthropic tool definition to Gemini function_declaration format."""
+    schema = anthropic_tool["input_schema"].copy()
+    # Gemini doesn't support top-level 'required' in the same way for all types,
+    # but genai library handles it. We keep it as-is.
+    return {
+        "name": anthropic_tool["name"],
+        "description": anthropic_tool.get("description", ""),
+        "parameters": schema,
+    }
+
+
+def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
+    """Convert Anthropic-style messages to Gemini contents format."""
+    contents = []
+    for msg in messages:
+        role = "user" if msg["role"] == "user" else "model"
+        c = msg.get("content", "")
+        if isinstance(c, str):
+            contents.append({"role": role, "parts": [{"text": c}]})
+        elif isinstance(c, list):
+            # Multi-part content (text + image)
+            parts = []
+            for block in c:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        parts.append({"text": block["text"]})
+                    elif block.get("type") == "image":
+                        src = block.get("source", {})
+                        parts.append({
+                            "inline_data": {
+                                "mime_type": src.get("media_type", "image/jpeg"),
+                                "data": src.get("data", ""),
+                            }
+                        })
+            if parts:
+                contents.append({"role": role, "parts": parts})
+    return contents
+
+
+async def _gemini_generate(system: str, messages: list, tools: list = None, max_tokens: int = 600) -> "genai.types.GenerateContentResponse":
+    """Call Gemini API with system instruction, messages, and optional tools."""
+    global _turn_cost
+    _ensure_configured()
+
+    tool_config = None
+    gemini_tools = None
+    if tools:
+        func_declarations = [_to_gemini_tool(t) for t in tools]
+        gemini_tools = [genai.types.Tool(function_declarations=func_declarations)]
+
+    model = genai.GenerativeModel(
+        model_name=MODEL,
+        system_instruction=system,
+        tools=gemini_tools,
+    )
+
+    contents = _anthropic_to_gemini_history(messages)
+
+    resp = await model.generate_content_async(
+        contents,
+        generation_config=genai.types.GenerationConfig(
+            max_output_tokens=max_tokens,
+            temperature=0.3,
+        ),
+    )
+
+    # Track cost
+    if hasattr(resp, 'usage_metadata') and resp.usage_metadata:
+        _turn_cost += (resp.usage_metadata.prompt_token_count or 0) * _COST_INPUT
+        _turn_cost += (resp.usage_metadata.candidates_token_count or 0) * _COST_OUTPUT
+
+    return resp
+
+
+def _get_text_from_response(resp) -> str:
+    """Extract text from a Gemini response."""
+    for part in (resp.candidates[0].content.parts if resp.candidates else []):
+        if hasattr(part, 'text') and part.text:
+            return part.text.strip()
+    return ""
+
+
+def _get_function_call(resp):
+    """Extract the first function call from a Gemini response, or None."""
+    for part in (resp.candidates[0].content.parts if resp.candidates else []):
+        if hasattr(part, 'function_call') and part.function_call and part.function_call.name:
+            return part.function_call
+    return None
 
 
 
@@ -487,65 +539,12 @@ def _build_profile_context(user: dict, memories: list = None) -> str:
 
 
 async def _ask(messages: list, system: str = SYSTEM_BASE) -> str:
-
-
-
-    global _turn_cost
-
-
-
     try:
-
-
-
-        client = get_client()
-
-
-
-        resp = await client.messages.create(
-
-
-
-            model=MODEL_TEXT,
-
-
-
-            max_tokens=600,
-
-
-
-            system=system,
-
-
-
-            messages=messages,
-
-
-
-        )
-
-
-
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
-
-
-
-        return resp.content[0].text.strip()
-
-
-
+        resp = await _gemini_generate(system=system, messages=messages, max_tokens=600)
+        return _get_text_from_response(resp)
     except Exception as e:
-
-
-
         import logging
-
-
-
-        logging.getLogger(__name__).error(f"[ai] Claude error: {type(e).__name__}: {e}")
-
-
-
+        logging.getLogger(__name__).error(f"[ai] Gemini error: {type(e).__name__}: {e}")
         return "Hubo un error procesando tu mensaje. Intenta de nuevo."
 
 
@@ -586,154 +585,47 @@ async def intake_turn(history: list, user_message: str) -> dict:
 
 
 
-    global _turn_cost
-
-
-
     messages = history + [{"role": "user", "content": user_message}]
 
-
-
     try:
-
-
-
-        client = get_client()
-
-
-
-        resp = await client.messages.create(
-
-
-
-            model=MODEL_TEXT,
-
-
-
-            max_tokens=800,
-
-
-
+        resp = await _gemini_generate(
             system=INTAKE_SYSTEM,
-
-
-
-            tools=[INTAKE_TOOL],
-
-
-
             messages=messages,
-
-
-
+            tools=[INTAKE_TOOL],
+            max_tokens=800,
         )
 
 
 
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
 
-
-
-
-
-
-
-        # Check if Claude called save_user_identity
-
-
-
-        for block in resp.content:
-
-
-
-            if block.type == "tool_use" and block.name == "save_user_identity":
-
-
-
-                inp = block.input
-
-
-
-                text_reply = next((b.text for b in resp.content if hasattr(b, "text")), None)
-
-
-
-                return {
-
-
-
-                    "reply": text_reply,
-
-
-
-                    "done": True,
-
-
-
-                    "profile": {
-
-
-
-                        "identity_markdown": inp.get("identity_markdown", ""),
-
-
-
-                        "name":           inp.get("name", ""),
-
-
-
-                        "age":            inp.get("age"),
-
-
-
-                        "weight_kg":      inp.get("weight_kg"),
-
-
-
-                        "height_cm":      inp.get("height_cm"),
-
-
-
-                        "goal":           inp.get("goal", "eat_healthier"),
-
-
-
-                        "activity_level": inp.get("activity_level", "sedentary"),
-
-
-
-                    }
-
-
-
+        # Check if Gemini called save_user_identity
+        fc = _get_function_call(resp)
+        if fc and fc.name == "save_user_identity":
+            inp = dict(fc.args)
+            text_reply = _get_text_from_response(resp) or None
+            return {
+                "reply": text_reply,
+                "done": True,
+                "profile": {
+                    "identity_markdown": inp.get("identity_markdown", ""),
+                    "name":           inp.get("name", ""),
+                    "age":            inp.get("age"),
+                    "weight_kg":      inp.get("weight_kg"),
+                    "height_cm":      inp.get("height_cm"),
+                    "goal":           inp.get("goal", "eat_healthier"),
+                    "activity_level": inp.get("activity_level", "sedentary"),
                 }
+            }
 
 
 
 
-
-
-
-        reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
-
-
-
-        return {"reply": reply.strip(), "done": False}
-
-
+        reply = _get_text_from_response(resp)
+        return {"reply": reply, "done": False}
 
     except Exception as e:
-
-
-
         import logging
-
-
-
         logging.getLogger(__name__).error(f"[ai] intake_turn error: {e}")
-
-
-
         return {"reply": "Hubo un error. Podes repetir eso?", "done": False}
 
 
@@ -748,9 +640,7 @@ async def intake_turn(history: list, user_message: str) -> dict:
 
 async def force_extract_profile(history: list) -> dict:
     """Force-extract a user profile from the conversation history."""
-    global _turn_cost
     try:
-        client = get_client()
         convo = "\n".join(
             ("User" if m["role"] == "user" else "Bot") + ": " + m["content"]
             for m in history[-20:]
@@ -764,14 +654,13 @@ async def force_extract_profile(history: list) -> dict:
             "reply (str, a friendly closing message in Argentine Spanish). "
             "Only output valid JSON, nothing else."
         )
-        resp = await client.messages.create(
-            model=MODEL_TEXT,
-            max_tokens=800,
+        resp = await _gemini_generate(
+            system="You extract user profiles from conversations. Output only valid JSON.",
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=800,
         )
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
         import json as _json, re as _re
-        raw = resp.content[0].text.strip()
+        raw = _get_text_from_response(resp)
         match = _re.search(r'\{.*\}', raw, _re.DOTALL)
         if match:
             return _json.loads(match.group())
@@ -2232,13 +2121,7 @@ async def process_message(
 
 
     # Build message content (text or text + image)
-
-
-
     if photo_path:
-
-
-
         try:
             with open(photo_path, "rb") as f:
                 raw = f.read()
@@ -2266,28 +2149,11 @@ async def process_message(
                 {"type": "text", "text": text or "Registra esta comida."},
             ]
 
-
-
         except Exception as e:
-
-
-
             import logging
-
-
-
             logging.getLogger(__name__).error(f"[ai] photo read error: {e}")
-
-
-
             content = text or "No pude leer la foto."
-
-
-
     else:
-
-
-
         content = text
 
 
@@ -2301,150 +2167,61 @@ async def process_message(
 
 
 
-
-
-
     try:
-
-
-
-        client = get_client()
-
-
-
-        resp = await client.messages.create(
-
-
-
-            model=MODEL_VISION if photo_path else MODEL_TEXT,
-
-
-
-            max_tokens=600,
-
-
-
+        resp = await _gemini_generate(
             system=system,
-
-
-
-            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL, SET_REMINDER_TOOL, SAVE_MEMORY_TOOL],
-
-
-
             messages=messages,
-
-
-
+            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL, SET_REMINDER_TOOL, SAVE_MEMORY_TOOL],
+            max_tokens=600,
         )
 
 
 
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
 
 
 
 
+        fc = _get_function_call(resp)
+        text_reply = _get_text_from_response(resp) or None
 
+        if fc:
+            args = dict(fc.args) if fc.args else {}
 
-
-        for block in resp.content:
-
-
-
-            if block.type != "tool_use":
-
-
-
-                continue
-
-
-
-            text_reply = next((b.text for b in resp.content if hasattr(b, "text")), None)
-
-
-
-            if block.name == "log_meal":
-
-
-
+            if fc.name == "log_meal":
                 import logging as _log
                 _log.getLogger(__name__).info(
-                    f"[ai] log_meal tool called: {block.input.get('detected_food','?')} "
-                    f"{block.input.get('calories','?')}kcal date_offset={block.input.get('date_offset', 0)}"
+                    f"[ai] log_meal tool called: {args.get('detected_food','?')} "
+                    f"{args.get('calories','?')}kcal date_offset={args.get('date_offset', 0)}"
                 )
-                return {"type": "meal", "meal": block.input, "reply": text_reply}
+                return {"type": "meal", "meal": args, "reply": text_reply}
 
+            if fc.name == "log_workout":
+                return {"type": "workout", "workout": args, "reply": text_reply}
 
+            if fc.name == "update_user_identity":
+                return {"type": "identity_update", "update": args, "reply": text_reply}
 
-            if block.name == "log_workout":
+            if fc.name == "delete_meal":
+                return {"type": "delete_meal", "meal_ids": args.get("meal_ids", []), "reply": text_reply}
 
+            if fc.name == "set_reminder":
+                return {"type": "set_reminder", "time_str": args.get("time_str", ""), "message": args.get("message", ""), "reply": text_reply}
 
-
-                return {"type": "workout", "workout": block.input, "reply": text_reply}
-
-
-
-            if block.name == "update_user_identity":
-
-
-
-                return {"type": "identity_update", "update": block.input, "reply": text_reply}
-
-
-
-            if block.name == "delete_meal":
-
-
-
-                return {"type": "delete_meal", "meal_ids": block.input.get("meal_ids", []), "reply": text_reply}
-
-
-
-            if block.name == "set_reminder":
-
-
-
-                return {"type": "set_reminder", "time_str": block.input.get("time_str", ""), "message": block.input.get("message", ""), "reply": text_reply}
-
-
-
-            if block.name == "save_memory":
-
-
-
-                return {"type": "save_memory", "content": block.input.get("content", ""), "category": block.input.get("category", "general"), "reply": text_reply}
+            if fc.name == "save_memory":
+                return {"type": "save_memory", "content": args.get("content", ""), "category": args.get("category", "general"), "reply": text_reply}
 
 
 
 
-
-
-
-        reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
-
-
-
-        return {"type": "text", "content": reply.strip()}
-
-
-
+        reply = _get_text_from_response(resp)
+        return {"type": "text", "content": reply}
 
 
 
 
     except Exception as e:
-
-
-
         import logging
-
-
-
         logging.getLogger(__name__).error(f"[ai] process_message error: {e}")
-
-
-
         return {"type": "text", "content": "Hubo un error procesando tu mensaje. Intenta de nuevo."}
 
 
@@ -2947,15 +2724,7 @@ async def generate_checkin_message(user: dict, trigger: str, memories: list = No
         + "\n\nYou are initiating a conversation proactively. Keep it to 1-2 lines max. Natural, warm, not pushy."
     )
 
-    client = get_client()
-    import anthropic
-    resp = await client.messages.create(
-        model=MODEL_TEXT,
-        max_tokens=150,
-        system=system,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return resp.content[0].text.strip()
+    return await _ask([{"role": "user", "content": prompt}], system=system)
 
 
 async def generate_macro_nudge(user: dict, total_cal: int, daily_goal: int, coach_mode: str = None) -> str:

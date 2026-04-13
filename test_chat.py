@@ -1,7 +1,7 @@
 """Simulate a full conversation with Coach Kai intake."""
 import os, asyncio
 os.environ['DATABASE_URL'] = ''
-os.environ['ANTHROPIC_API_KEY'] = open('.env').read().split('ANTHROPIC_API_KEY=')[1].split()[0]
+os.environ['GEMINI_API_KEY'] = open('.env').read().split('GEMINI_API_KEY=')[1].split()[0]
 import db; db.init_db()
 import ai
 

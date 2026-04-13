@@ -15,18 +15,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 RAFA_ID = 1557872061  # Rafa's Telegram ID
 
 if not TELEGRAM_TOKEN:
     print("❌ TELEGRAM_BOT_TOKEN not set in .env")
     sys.exit(1)
-if not ANTHROPIC_KEY:
-    print("❌ ANTHROPIC_API_KEY not set in .env")
+if not GEMINI_KEY:
+    print("❌ GEMINI_API_KEY not set in .env")
     sys.exit(1)
 
 # Set env for ai.py
-os.environ["ANTHROPIC_API_KEY"] = ANTHROPIC_KEY
+os.environ["GEMINI_API_KEY"] = GEMINI_KEY
 
 
 async def run_tests():
