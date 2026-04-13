@@ -70,14 +70,14 @@ def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
         role = "user" if msg["role"] == "user" else "model"
         c = msg.get("content", "")
         if isinstance(c, str):
-            contents.append({"role": role, "parts": [{"text": c}]})
+            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=c)]))
         elif isinstance(c, list):
             # Multi-part content (text + image)
             parts = []
             for block in c:
                 if isinstance(block, dict):
                     if block.get("type") == "text":
-                        parts.append({"text": block["text"]})
+                        parts.append(types.Part.from_text(text=block["text"]))
                     elif block.get("type") == "image":
                         src = block.get("source", {})
                         import base64 as _b64
@@ -87,7 +87,7 @@ def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
                             mime_type=src.get("media_type", "image/jpeg"),
                         ))
             if parts:
-                contents.append({"role": role, "parts": parts})
+                contents.append(types.Content(role=role, parts=parts))
     return contents
 
 
