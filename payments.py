@@ -69,6 +69,9 @@ def create_preapproval(telegram_id: int, payer_email: str = "", plan: str = "mon
         "status": "pending",
     }
 
+    if payer_email:
+        preapproval_data["payer_email"] = payer_email
+
     try:
         result = sdk.preapproval().create(preapproval_data)
         response = result.get("response", {})
