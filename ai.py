@@ -64,9 +64,11 @@ def _to_gemini_tool(anthropic_tool: dict) -> dict:
 
 
 def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
-    """Convert Anthropic-style messages to Gemini contents format."""
-    import logging as _log
-    _logger = _log.getLogger(__name__)
+    """Convert message history to Gemini contents format.
+
+    Handles both string content, dict-based Anthropic format,
+    and native types.Part objects (from process_message photo handling).
+    """
     contents = []
     for msg in messages:
         role = "user" if msg["role"] == "user" else "model"
@@ -74,26 +76,14 @@ def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
         if isinstance(c, str):
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=c)]))
         elif isinstance(c, list):
-            # Multi-part content (text + image)
             parts = []
             for block in c:
-                if isinstance(block, dict):
+                # Already a types.Part object (photo from process_message)
+                if isinstance(block, types.Part):
+                    parts.append(block)
+                elif isinstance(block, dict):
                     if block.get("type") == "text":
                         parts.append(types.Part.from_text(text=block["text"]))
-                    elif block.get("type") == "image":
-                        src = block.get("source", {})
-                        b64_data = src.get("data", "")
-                        mime = src.get("media_type", "image/jpeg")
-                        # Normalize mime type - reject non-image types
-                        if mime.startswith("application/"):
-                            mime = "image/jpeg"
-                        _logger.info(f"[ai] image part: mime={mime}, b64_len={len(b64_data)}")
-                        parts.append(types.Part(
-                            inline_data=types.Blob(
-                                mime_type=mime,
-                                data=b64_data,
-                            )
-                        ))
             if parts:
                 contents.append(types.Content(role=role, parts=parts))
     return contents
@@ -2127,29 +2117,27 @@ async def process_message(
     if photo_path:
         try:
             with open(photo_path, "rb") as f:
-                raw = f.read()
+                image_bytes = f.read()
 
             import logging as _log
             _logger = _log.getLogger(__name__)
-            _logger.info(f"[ai] photo file: {photo_path}, size={len(raw)} bytes, first4={raw[:4].hex()}")
+            _logger.info(f"[ai] photo file: {photo_path}, size={len(image_bytes)} bytes, first4={image_bytes[:4].hex()}")
 
-            ext = photo_path.rsplit(".", 1)[-1].lower()
-            media_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
-                          "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+            # Detect mime type from magic bytes
+            if image_bytes[:3] == b'\xff\xd8\xff':
+                mime = "image/jpeg"
+            elif image_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+                mime = "image/png"
+            elif image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP':
+                mime = "image/webp"
+            else:
+                mime = "image/jpeg"  # fallback
+            _logger.info(f"[ai] detected mime={mime}")
 
-            # Detect actual format from magic bytes
-            if raw[:3] == b'\xff\xd8\xff':
-                media_type = "image/jpeg"
-            elif raw[:8] == b'\x89PNG\r\n\x1a\n':
-                media_type = "image/png"
-            elif raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
-                media_type = "image/webp"
-            _logger.info(f"[ai] detected media_type={media_type}")
-
-            img_data = base64.standard_b64encode(raw).decode("utf-8")
+            # Pass raw bytes directly via types.Part.from_bytes — avoids base64 padding issues
             content = [
-                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}},
-                {"type": "text", "text": text or "Registra esta comida."},
+                types.Part.from_bytes(data=image_bytes, mime_type=mime),
+                types.Part.from_text(text=text or "Registra esta comida."),
             ]
 
         except Exception as e:
