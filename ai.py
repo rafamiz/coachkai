@@ -1,13 +1,14 @@
 import pytz
 import base64
 import os
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 
 
 
 
-_configured = False
+_client = None
 
 
 
@@ -15,16 +16,14 @@ _configured = False
 
 
 
-
-
-def _ensure_configured():
-    global _configured
-    if not _configured:
+def _get_client():
+    global _client
+    if _client is None:
         key = os.environ.get("GEMINI_API_KEY", "")
         import logging
         logging.getLogger(__name__).info(f"[ai] Gemini API key loaded: {'YES (len=' + str(len(key)) + ')' if key else 'NO - KEY MISSING'}")
-        genai.configure(api_key=key)
-        _configured = True
+        _client = genai.Client(api_key=key)
+    return _client
 
 
 
@@ -36,7 +35,7 @@ def _ensure_configured():
 
 
 
-MODEL = "gemini-2.0-flash"
+MODEL = "gemini-2.5-flash-lite"
 
 
 
@@ -92,30 +91,26 @@ def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
     return contents
 
 
-async def _gemini_generate(system: str, messages: list, tools: list = None, max_tokens: int = 600) -> "genai.types.GenerateContentResponse":
+async def _gemini_generate(system: str, messages: list, tools: list = None, max_tokens: int = 600):
     """Call Gemini API with system instruction, messages, and optional tools."""
     global _turn_cost
-    _ensure_configured()
+    client = _get_client()
 
-    tool_config = None
     gemini_tools = None
     if tools:
         func_declarations = [_to_gemini_tool(t) for t in tools]
-        gemini_tools = [genai.types.Tool(function_declarations=func_declarations)]
-
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=system,
-        tools=gemini_tools,
-    )
+        gemini_tools = [types.Tool(function_declarations=func_declarations)]
 
     contents = _anthropic_to_gemini_history(messages)
 
-    resp = await model.generate_content_async(
-        contents,
-        generation_config=genai.types.GenerationConfig(
+    resp = await client.aio.models.generate_content(
+        model=MODEL,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system,
             max_output_tokens=max_tokens,
             temperature=0.3,
+            tools=gemini_tools,
         ),
     )
 
