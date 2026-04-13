@@ -80,12 +80,12 @@ def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
                         parts.append({"text": block["text"]})
                     elif block.get("type") == "image":
                         src = block.get("source", {})
-                        parts.append({
-                            "inline_data": {
-                                "mime_type": src.get("media_type", "image/jpeg"),
-                                "data": src.get("data", ""),
-                            }
-                        })
+                        import base64 as _b64
+                        raw_bytes = _b64.b64decode(src.get("data", ""))
+                        parts.append(types.Part.from_bytes(
+                            data=raw_bytes,
+                            mime_type=src.get("media_type", "image/jpeg"),
+                        ))
             if parts:
                 contents.append({"role": role, "parts": parts})
     return contents
