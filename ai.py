@@ -35,7 +35,8 @@ def _get_client():
 
 
 
-MODEL = "gemini-2.5-flash-lite"
+MODEL = "gemini-2.5-flash-lite"          # texto — barato y rápido
+VISION_MODEL = "gemini-1.5-flash"       # fotos — soporta multimodal garantizado
 
 
 
@@ -89,7 +90,7 @@ def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
     return contents
 
 
-async def _gemini_generate(system: str, messages: list, tools: list = None, max_tokens: int = 600):
+async def _gemini_generate(system: str, messages: list, tools: list = None, max_tokens: int = 600, model: str = None):
     """Call Gemini API with system instruction, messages, and optional tools."""
     global _turn_cost
     client = _get_client()
@@ -101,8 +102,10 @@ async def _gemini_generate(system: str, messages: list, tools: list = None, max_
 
     contents = _anthropic_to_gemini_history(messages)
 
+    use_model = model or MODEL
+
     resp = await client.aio.models.generate_content(
-        model=MODEL,
+        model=use_model,
         contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=system,
@@ -2164,6 +2167,7 @@ async def process_message(
             messages=messages,
             tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL, SET_REMINDER_TOOL, SAVE_MEMORY_TOOL],
             max_tokens=600,
+            model=VISION_MODEL if photo_path else None,
         )
 
 
