@@ -48,47 +48,49 @@ def get_or_create_user(numero: str) -> dict:
 
 
 async def download_media_to_file(url: str) -> str:
-    """Download Twilio media, save to photos/, return local file path."""
+    """Download Twilio media using requests (sync in executor), save to photos/."""
+    import asyncio
+    import requests as _req
+
     os.makedirs("photos", exist_ok=True)
-
-    IMAGE_MAGIC = {
-        b'\xff\xd8\xff': "image/jpeg",
-        b'\x89PNG': "image/png",
-        b'RIFF': "image/webp",  # RIFF....WEBP
-        b'GIF8': "image/gif",
-    }
-
     sid = TWILIO_ACCOUNT_SID.strip()
     token = TWILIO_AUTH_TOKEN.strip()
-    logger.info(f"[download] SID={'SET('+sid[:6]+'..len'+str(len(sid))+')' if sid else 'MISSING'}, TOKEN={'SET(len'+str(len(token))+')' if token else 'MISSING'}")
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.get(url, auth=httpx.BasicAuth(sid, token), follow_redirects=True)
-        content_type = r.headers.get("content-type", "image/jpeg")
-        body = r.content
-        first50 = body[:50].hex() if body else "(empty)"
-        logger.info(
-            f"[download] status={r.status_code}, content_type={content_type}, "
-            f"size={len(body)} bytes, first50hex={first50}"
-        )
+    logger.info(f"[download] SID=len{len(sid)}, TOKEN=len{len(token)}, url={url[:60]}")
 
-        # Si no es imagen (ej: devuelve HTML por auth fallida), tirar error claro
-        is_image = any(body[:len(magic)] == magic for magic in IMAGE_MAGIC)
-        if not is_image:
-            preview = body[:200].decode("utf-8", errors="replace")
-            logger.error(f"[download] NOT an image! Preview: {preview}")
-            raise ValueError(f"Twilio returned non-image content (status={r.status_code}): {preview[:80]}")
+    IMAGE_MAGIC = [
+        (b'\xff\xd8\xff', "jpg"),
+        (b'\x89PNG\r\n\x1a\n', "png"),
+        (b'RIFF', "webp"),
+        (b'GIF8', "gif"),
+    ]
 
-        ext = "jpg"
-        for magic, mime in IMAGE_MAGIC.items():
-            if body[:len(magic)] == magic:
-                ext = mime.split("/")[1]
-                if ext == "jpeg":
-                    ext = "jpg"
-                break
+    def _sync_fetch():
+        r = _req.get(url, auth=(sid, token), timeout=30, allow_redirects=True)
+        return r.status_code, r.headers.get("content-type", ""), r.content
 
-        fname = f"photos/wa_{uuid.uuid4().hex}.{ext}"
-        with open(fname, "wb") as f:
-            f.write(body)
+    loop = asyncio.get_event_loop()
+    status, content_type, body = await loop.run_in_executor(None, _sync_fetch)
+
+    first50 = body[:50].hex() if body else "(empty)"
+    logger.info(f"[download] status={status}, content_type={content_type}, size={len(body)}, first50={first50}")
+
+    # Verificar que es imagen real
+    is_image = any(body[:len(magic)] == magic for magic, _ in IMAGE_MAGIC)
+    if not is_image:
+        preview = body[:200].decode("utf-8", errors="replace")
+        logger.error(f"[download] NOT an image! Preview: {preview}")
+        raise ValueError(f"Non-image response (status={status}): {preview[:80]}")
+
+    ext = "jpg"
+    for magic, magic_ext in IMAGE_MAGIC:
+        if body[:len(magic)] == magic:
+            ext = magic_ext
+            break
+
+    fname = f"photos/wa_{uuid.uuid4().hex}.{ext}"
+    with open(fname, "wb") as f:
+        f.write(body)
+    logger.info(f"[download] saved to {fname}")
     return fname
 
 
