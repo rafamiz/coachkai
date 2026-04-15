@@ -51,16 +51,42 @@ async def download_media_to_file(url: str) -> str:
     """Download Twilio media, save to photos/, return local file path."""
     os.makedirs("photos", exist_ok=True)
     auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+    IMAGE_MAGIC = {
+        b'\xff\xd8\xff': "image/jpeg",
+        b'\x89PNG': "image/png",
+        b'RIFF': "image/webp",  # RIFF....WEBP
+        b'GIF8': "image/gif",
+    }
+
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.get(url, auth=auth, follow_redirects=True)
         content_type = r.headers.get("content-type", "image/jpeg")
-        logger.info(f"[download] url={url}, status={r.status_code}, content_type={content_type}, size={len(r.content)} bytes")
-        ext = content_type.split("/")[-1].split(";")[0].strip().lower()
-        if ext not in ("jpeg", "jpg", "png", "webp"):
-            ext = "jpg"
+        body = r.content
+        first50 = body[:50].hex() if body else "(empty)"
+        logger.info(
+            f"[download] status={r.status_code}, content_type={content_type}, "
+            f"size={len(body)} bytes, first50hex={first50}"
+        )
+
+        # Si no es imagen (ej: devuelve HTML por auth fallida), tirar error claro
+        is_image = any(body[:len(magic)] == magic for magic in IMAGE_MAGIC)
+        if not is_image:
+            preview = body[:200].decode("utf-8", errors="replace")
+            logger.error(f"[download] NOT an image! Preview: {preview}")
+            raise ValueError(f"Twilio returned non-image content (status={r.status_code}): {preview[:80]}")
+
+        ext = "jpg"
+        for magic, mime in IMAGE_MAGIC.items():
+            if body[:len(magic)] == magic:
+                ext = mime.split("/")[1]
+                if ext == "jpeg":
+                    ext = "jpg"
+                break
+
         fname = f"photos/wa_{uuid.uuid4().hex}.{ext}"
         with open(fname, "wb") as f:
-            f.write(r.content)
+            f.write(body)
     return fname
 
 
