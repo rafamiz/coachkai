@@ -47,7 +47,7 @@ def _get_vision_client():
 
 
 MODEL = "gemini-2.5-flash-lite"          # texto — barato y rápido
-VISION_MODEL = "gemini-2.5-flash"        # fotos — v1beta, multimodal completo
+VISION_MODEL = "gemini-2.5-flash-lite"   # fotos — mismo modelo que texto, multimodal ok
 
 
 
