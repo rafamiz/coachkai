@@ -47,7 +47,7 @@ def _get_vision_client():
 
 
 MODEL = "gemini-2.5-flash-lite"          # texto — barato y rápido
-VISION_MODEL = "gemini-1.5-flash-002"   # fotos — soporta multimodal garantizado
+VISION_MODEL = "gemini-2.5-flash"        # fotos — v1beta, multimodal completo
 
 
 
@@ -106,12 +106,7 @@ async def _gemini_generate(system: str, messages: list, tools: list = None, max_
     global _turn_cost
 
     use_model = model or MODEL
-    # gemini-1.5-x models only exist in v1 (stable), not v1beta
-    # Use a separate client with api_version=v1 for those
-    if use_model.startswith("gemini-1.5"):
-        client = _get_vision_client()
-    else:
-        client = _get_client()
+    client = _get_client()
 
     gemini_tools = None
     if tools:
