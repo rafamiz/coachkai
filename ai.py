@@ -36,7 +36,7 @@ def _get_client():
 
 
 MODEL = "gemini-2.5-flash-lite"          # texto — barato y rápido
-VISION_MODEL = "gemini-1.5-flash"       # fotos — soporta multimodal garantizado
+VISION_MODEL = "gemini-1.5-flash-002"   # fotos — soporta multimodal garantizado
 
 
 
