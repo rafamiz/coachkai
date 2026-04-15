@@ -139,28 +139,43 @@ def handle_webhook(data: dict) -> bool:
 
         now_str = datetime.now(_BA).strftime("%Y-%m-%d %H:%M:%S")
 
-        status_map = {
-            "authorized": "active",
-            "paused": "past_due",
-            "cancelled": "cancelled",
-            "pending": "trial",
-        }
-        new_status = status_map.get(mp_status)
+        # MP preapproval status lifecycle:
+        # "pending"    → preapproval creada pero usuario AUN NO ingresó tarjeta
+        # "authorized" → usuario ingresó tarjeta; trial activo o pago procesado
+        # "paused"     → suscripción pausada (pago fallido)
+        # "cancelled"  → cancelada
 
-        if new_status:
-            if new_status == "trial":
-                # Card registered — start 7-day free trial
+        if mp_status == "pending":
+            # Solo actualizar el ID, NO activar acceso — el usuario todavía no pagó
+            db.update_subscription(telegram_id, mp_preapproval_id=resource_id)
+            logger.info(f"[payments] Preapproval pending (no card yet) for tid={telegram_id}")
+
+        elif mp_status == "authorized":
+            # Tarjeta ingresada → activar trial de 7 días
+            sub = db.get_subscription(telegram_id)
+            current_status = sub.get("status") if sub else None
+            if current_status not in ("active", "trial"):
+                # Primera vez — arrancar trial
                 db.create_trial(telegram_id)
                 db.update_subscription(telegram_id, mp_preapproval_id=resource_id)
-            elif new_status == "active":
-                update_kwargs = {"status": new_status, "mp_preapproval_id": resource_id}
+                logger.info(f"[payments] Trial started for tid={telegram_id}")
+            else:
+                # Ya tenía trial/active — solo actualizar ID y marcar activo
+                update_kwargs = {"status": "active", "mp_preapproval_id": resource_id}
                 update_kwargs["current_period_start"] = now_str
                 next_end = (datetime.now(_BA) + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
                 update_kwargs["current_period_end"] = next_end
                 db.update_subscription(telegram_id, **update_kwargs)
-            else:
-                db.update_subscription(telegram_id, status=new_status, mp_preapproval_id=resource_id)
-            logger.info(f"[payments] Subscription updated: tid={telegram_id}, mp_status={mp_status} -> {new_status}")
+                logger.info(f"[payments] Subscription activated for tid={telegram_id}")
+
+        elif mp_status == "paused":
+            db.update_subscription(telegram_id, status="past_due", mp_preapproval_id=resource_id)
+            logger.info(f"[payments] Subscription past_due for tid={telegram_id}")
+
+        elif mp_status == "cancelled":
+            db.update_subscription(telegram_id, status="cancelled", mp_preapproval_id=resource_id)
+            logger.info(f"[payments] Subscription cancelled for tid={telegram_id}")
+
         else:
             logger.info(f"[payments] Unhandled MP status: {mp_status} for tid={telegram_id}")
 
