@@ -59,6 +59,7 @@ async def download_media_to_file(url: str) -> str:
         b'GIF8': "image/gif",
     }
 
+    logger.info(f"[download] SID={'SET('+TWILIO_ACCOUNT_SID[:6]+')' if TWILIO_ACCOUNT_SID else 'MISSING'}, TOKEN={'SET' if TWILIO_AUTH_TOKEN else 'MISSING'}")
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.get(url, auth=auth, follow_redirects=True)
         content_type = r.headers.get("content-type", "image/jpeg")
