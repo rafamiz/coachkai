@@ -9,8 +9,7 @@ from google.genai import types
 
 
 _client = None
-
-
+_vision_client = None
 
 
 
@@ -24,6 +23,18 @@ def _get_client():
         logging.getLogger(__name__).info(f"[ai] Gemini API key loaded: {'YES (len=' + str(len(key)) + ')' if key else 'NO - KEY MISSING'}")
         _client = genai.Client(api_key=key)
     return _client
+
+
+def _get_vision_client():
+    """Cliente con api_version=v1 para modelos gemini-1.5-x (stable, soportan vision)."""
+    global _vision_client
+    if _vision_client is None:
+        key = os.environ.get("GEMINI_API_KEY", "")
+        _vision_client = genai.Client(
+            api_key=key,
+            http_options=types.HttpOptions(api_version="v1"),
+        )
+    return _vision_client
 
 
 
@@ -93,7 +104,14 @@ def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
 async def _gemini_generate(system: str, messages: list, tools: list = None, max_tokens: int = 600, model: str = None):
     """Call Gemini API with system instruction, messages, and optional tools."""
     global _turn_cost
-    client = _get_client()
+
+    use_model = model or MODEL
+    # gemini-1.5-x models only exist in v1 (stable), not v1beta
+    # Use a separate client with api_version=v1 for those
+    if use_model.startswith("gemini-1.5"):
+        client = _get_vision_client()
+    else:
+        client = _get_client()
 
     gemini_tools = None
     if tools:
@@ -101,8 +119,6 @@ async def _gemini_generate(system: str, messages: list, tools: list = None, max_
         gemini_tools = [types.Tool(function_declarations=func_declarations)]
 
     contents = _anthropic_to_gemini_history(messages)
-
-    use_model = model or MODEL
 
     resp = await client.aio.models.generate_content(
         model=use_model,
