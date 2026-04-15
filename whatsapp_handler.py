@@ -50,7 +50,6 @@ def get_or_create_user(numero: str) -> dict:
 async def download_media_to_file(url: str) -> str:
     """Download Twilio media, save to photos/, return local file path."""
     os.makedirs("photos", exist_ok=True)
-    auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
     IMAGE_MAGIC = {
         b'\xff\xd8\xff': "image/jpeg",
@@ -59,9 +58,11 @@ async def download_media_to_file(url: str) -> str:
         b'GIF8': "image/gif",
     }
 
-    logger.info(f"[download] SID={'SET('+TWILIO_ACCOUNT_SID[:6]+')' if TWILIO_ACCOUNT_SID else 'MISSING'}, TOKEN={'SET' if TWILIO_AUTH_TOKEN else 'MISSING'}")
+    sid = TWILIO_ACCOUNT_SID.strip()
+    token = TWILIO_AUTH_TOKEN.strip()
+    logger.info(f"[download] SID={'SET('+sid[:6]+'..len'+str(len(sid))+')' if sid else 'MISSING'}, TOKEN={'SET(len'+str(len(token))+')' if token else 'MISSING'}")
     async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.get(url, auth=auth, follow_redirects=True)
+        r = await c.get(url, auth=httpx.BasicAuth(sid, token), follow_redirects=True)
         content_type = r.headers.get("content-type", "image/jpeg")
         body = r.content
         first50 = body[:50].hex() if body else "(empty)"
