@@ -2129,34 +2129,36 @@ async def process_message(
 
     # Build message content (text or text + image)
     if photo_path:
+        import logging as _log
+        import io
+        _logger = _log.getLogger(__name__)
         try:
-            with open(photo_path, "rb") as f:
-                image_bytes = f.read()
+            # Convertir SIEMPRE a JPEG via Pillow — maneja HEIC, WEBP, PNG, etc.
+            # y garantiza un formato que Gemini acepta sin problemas.
+            from PIL import Image as _PILImage
+            with _PILImage.open(photo_path) as img:
+                # Resize si es muy grande (Gemini recomienda max 3072px por lado)
+                max_side = 2048
+                if max(img.width, img.height) > max_side:
+                    ratio = max_side / max(img.width, img.height)
+                    new_size = (int(img.width * ratio), int(img.height * ratio))
+                    img = img.resize(new_size, _PILImage.LANCZOS)
+                    _logger.info(f"[ai] resized to {new_size}")
 
-            import logging as _log
-            _logger = _log.getLogger(__name__)
-            _logger.info(f"[ai] photo file: {photo_path}, size={len(image_bytes)} bytes, first4={image_bytes[:4].hex()}")
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="JPEG", quality=85)
+                image_bytes = buf.getvalue()
 
-            # Detect mime type from magic bytes
-            if image_bytes[:3] == b'\xff\xd8\xff':
-                mime = "image/jpeg"
-            elif image_bytes[:8] == b'\x89PNG\r\n\x1a\n':
-                mime = "image/png"
-            elif image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP':
-                mime = "image/webp"
-            else:
-                mime = "image/jpeg"  # fallback
-            _logger.info(f"[ai] detected mime={mime}")
+            mime = "image/jpeg"
+            _logger.info(f"[ai] photo ready: {len(image_bytes)} bytes, mime={mime}")
 
-            # Pass raw bytes directly via types.Part.from_bytes — avoids base64 padding issues
             content = [
                 types.Part.from_bytes(data=image_bytes, mime_type=mime),
                 types.Part.from_text(text=text or "Registra esta comida."),
             ]
 
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"[ai] photo read error: {e}")
+            _logger.error(f"[ai] photo read/convert error: {e}", exc_info=True)
             content = text or "No pude leer la foto."
     else:
         content = text
