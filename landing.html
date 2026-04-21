@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CoachKai — Tu coach de nutrición por WhatsApp</title>
+<meta name="description" content="Coach de nutrición con IA que te habla por WhatsApp. Mandale una foto de tu plato y te dice qué comiste, cuántas calorías y qué ajustar. Sin apps, sin planillas.">
+<meta property="og:title" content="CoachKai — Tu coach de nutrición por WhatsApp">
+<meta property="og:description" content="Mandá una foto, recibí tu análisis. Nutrición real, sin planillas.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #07070d;
+  --bg-soft: #0f0f1a;
+  --card: #13131f;
+  --card-border: rgba(255,255,255,0.08);
+  --primary: #6366f1;
+  --accent: #a855f7;
+  --green: #25d366;
+  --green-dark: #128c7e;
+  --text: #ffffff;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --success: #22c55e;
+  --radius: 16px;
+  --max: 1200px;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+a { color: inherit; text-decoration: none; }
+
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 1.5rem; }
+
+/* NAV */
+nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 50;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: rgba(7,7,13,0.72);
+  border-bottom: 1px solid var(--card-border);
+}
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1.5rem;
+  max-width: var(--max);
+  margin: 0 auto;
+}
+.logo {
+  font-weight: 800;
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.logo-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  box-shadow: 0 0 20px var(--accent);
+}
+.nav-links { display: flex; gap: 2rem; align-items: center; }
+.nav-links a {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+.nav-links a:hover { color: var(--text); }
+@media (max-width: 720px) { .nav-links a:not(.btn-nav) { display: none; } }
+
+.btn-nav {
+  background: var(--text);
+  color: var(--bg) !important;
+  padding: 0.55rem 1.1rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.9rem !important;
+  transition: transform 0.15s;
+}
+.btn-nav:hover { transform: translateY(-1px); }
+
+/* HERO */
+.hero {
+  position: relative;
+  padding: 9rem 1.5rem 5rem;
+  overflow: hidden;
+}
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(600px 400px at 20% 10%, rgba(99,102,241,0.25), transparent 60%),
+    radial-gradient(500px 400px at 80% 30%, rgba(168,85,247,0.18), transparent 60%),
+    radial-gradient(400px 300px at 50% 80%, rgba(37,211,102,0.12), transparent 60%);
+  pointer-events: none;
+}
+.hero-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
+  pointer-events: none;
+}
+.hero-inner {
+  position: relative;
+  max-width: var(--max);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 4rem;
+  align-items: center;
+}
+@media (max-width: 960px) {
+  .hero-inner { grid-template-columns: 1fr; gap: 3rem; text-align: center; }
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.9rem;
+  background: rgba(99,102,241,0.1);
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #c7d2fe;
+  margin-bottom: 1.5rem;
+}
+.pill-dot {
+  width: 6px; height: 6px;
+  background: var(--success);
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--success);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.hero h1 {
+  font-size: clamp(2.5rem, 5.5vw, 4.2rem);
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin-bottom: 1.5rem;
+}
+.hero h1 .gradient {
+  background: linear-gradient(135deg, #818cf8 0%, #c084fc 50%, #f472b6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero p.lead {
+  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+  color: var(--text-muted);
+  max-width: 540px;
+  margin-bottom: 2rem;
+}
+@media (max-width: 960px) { .hero p.lead { margin-left: auto; margin-right: auto; } }
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+@media (max-width: 960px) { .cta-row { justify-content: center; } }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1rem 1.6rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 1rem;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.2s;
+  font-family: inherit;
+}
+.btn-primary {
+  background: var(--green);
+  color: white;
+  box-shadow: 0 10px 30px -10px rgba(37,211,102,0.5);
+}
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 14px 34px -8px rgba(37,211,102,0.6); }
+.btn-ghost {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--card-border);
+  color: var(--text);
+}
+.btn-ghost:hover { background: rgba(255,255,255,0.1); }
+
+.hero-social {
+  margin-top: 2.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+@media (max-width: 960px) { .hero-social { justify-content: center; } }
+.avatars { display: flex; }
+.avatars img, .avatars .av {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  margin-left: -8px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.75rem; font-weight: 700;
+}
+.avatars .av:first-child { margin-left: 0; }
+.avatars .av:nth-child(2) { background: linear-gradient(135deg, #f472b6, #fb7185); }
+.avatars .av:nth-child(3) { background: linear-gradient(135deg, #34d399, #22d3ee); }
+.avatars .av:nth-child(4) { background: linear-gradient(135deg, #fbbf24, #f97316); }
+.stars { color: #fbbf24; letter-spacing: 0.1em; }
+
+/* PHONE MOCKUP */
+.phone-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  perspective: 1200px;
+}
+.phone {
+  position: relative;
+  width: 320px;
+  height: 640px;
+  background: #0a0a0f;
+  border-radius: 44px;
+  padding: 10px;
+  box-shadow:
+    0 0 0 2px rgba(255,255,255,0.06),
+    0 40px 80px -20px rgba(99,102,241,0.5),
+    0 0 120px -30px rgba(168,85,247,0.6);
+  transform: rotate(-2deg);
+  animation: float 6s ease-in-out infinite;
+}
+@keyframes float {
+  0%, 100% { transform: rotate(-2deg) translateY(0); }
+  50% { transform: rotate(-2deg) translateY(-12px); }
+}
+.phone-screen {
+  width: 100%; height: 100%;
+  background: #0b141a;
+  border-radius: 36px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.phone-notch {
+  position: absolute;
+  top: 10px; left: 50%;
+  transform: translateX(-50%);
+  width: 90px; height: 22px;
+  background: #07070d;
+  border-radius: 999px;
+  z-index: 5;
+}
+.wa-header {
+  background: #202c33;
+  padding: 2.6rem 1rem 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.wa-avatar {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 1rem;
+}
+.wa-name { font-weight: 600; font-size: 0.95rem; }
+.wa-status { font-size: 0.7rem; color: #8696a0; }
+
+.wa-chat {
+  flex: 1;
+  padding: 1rem 0.75rem;
+  background:
+    linear-gradient(rgba(11,20,26,0.95), rgba(11,20,26,0.95)),
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0 2px, transparent 2px 10px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.msg {
+  max-width: 78%;
+  padding: 0.55rem 0.75rem 0.4rem;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  position: relative;
+  opacity: 0;
+  animation: msgIn 0.5s forwards;
+}
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.msg.out { align-self: flex-end; background: #005c4b; color: #e9edef; border-bottom-right-radius: 2px; }
+.msg.in { align-self: flex-start; background: #202c33; color: #e9edef; border-bottom-left-radius: 2px; }
+.msg.photo { padding: 4px; }
+.msg.photo .ph {
+  width: 180px; height: 130px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255,165,0,0.3), rgba(255,255,0,0.2)),
+    radial-gradient(circle at 30% 40%, #ff6b35 0 20%, transparent 21%),
+    radial-gradient(circle at 70% 60%, #4ade80 0 18%, transparent 19%),
+    radial-gradient(circle at 50% 30%, #fbbf24 0 15%, transparent 16%),
+    #7c2d12;
+}
+.msg.photo .cap { padding: 0.25rem 0.5rem 0.35rem; font-size: 0.75rem; color: #8696a0; }
+.msg .time { font-size: 0.65rem; color: #8696a0; margin-left: 0.5rem; }
+.msg:nth-child(1) { animation-delay: 0.3s; }
+.msg:nth-child(2) { animation-delay: 0.9s; }
+.msg:nth-child(3) { animation-delay: 1.6s; }
+.msg:nth-child(4) { animation-delay: 2.4s; }
+.msg:nth-child(5) { animation-delay: 3.2s; }
+
+.typing { display: inline-flex; gap: 3px; align-items: center; padding: 0.6rem 0.8rem; }
+.typing span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #8696a0;
+  animation: typing 1.3s infinite;
+}
+.typing span:nth-child(2) { animation-delay: 0.2s; }
+.typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing {
+  0%, 100% { opacity: 0.3; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* SECTIONS */
+section { padding: 5rem 1.5rem; position: relative; }
+.section-head { text-align: center; max-width: 720px; margin: 0 auto 3.5rem; }
+.eyebrow {
+  display: inline-block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #a5b4fc;
+  margin-bottom: 1rem;
+}
+h2.section-title {
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-bottom: 1rem;
+}
+.section-head p {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+/* PROBLEM */
+.problem { background: var(--bg-soft); }
+.problem-grid {
+  max-width: var(--max);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.25rem;
+}
+.prob-card {
+  padding: 1.75rem;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  transition: border-color 0.2s, transform 0.2s;
+}
+.prob-card:hover { border-color: rgba(99,102,241,0.4); transform: translateY(-3px); }
+.prob-card .ico {
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 12px;
+  background: rgba(239,68,68,0.1);
+  font-size: 1.4rem;
+  margin-bottom: 1rem;
+}
+.prob-card h3 { font-size: 1.1rem; margin-bottom: 0.5rem; font-weight: 700; }
+.prob-card p { color: var(--text-muted); font-size: 0.95rem; }
+
+/* HOW IT WORKS */
+.steps {
+  max-width: 960px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  position: relative;
+}
+@media (max-width: 780px) { .steps { grid-template-columns: 1fr; } }
+.step {
+  text-align: center;
+  padding: 2rem 1.5rem;
+  background: linear-gradient(180deg, rgba(99,102,241,0.05), transparent);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  position: relative;
+}
+.step-num {
+  position: absolute;
+  top: -18px; left: 50%;
+  transform: translateX(-50%);
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: white;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800;
+  font-size: 0.95rem;
+  box-shadow: 0 8px 20px -4px rgba(99,102,241,0.6);
+}
+.step-icon { font-size: 2.5rem; margin: 0.5rem 0 1rem; }
+.step h3 { font-size: 1.2rem; margin-bottom: 0.5rem; font-weight: 700; }
+.step p { color: var(--text-muted); font-size: 0.95rem; }
+
+/* FEATURES */
+.features {
+  background: var(--bg-soft);
+}
+.feat-grid {
+  max-width: var(--max);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+.feat {
+  padding: 2rem;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s, border-color 0.2s;
+}
+.feat:hover { transform: translateY(-4px); border-color: rgba(99,102,241,0.4); }
+.feat::before {
+  content: '';
+  position: absolute;
+  top: -40px; right: -40px;
+  width: 120px; height: 120px;
+  background: radial-gradient(circle, rgba(99,102,241,0.15), transparent 70%);
+  border-radius: 50%;
+}
+.feat-ico {
+  width: 48px; height: 48px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  border-radius: 12px;
+  font-size: 1.5rem;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 8px 20px -4px rgba(99,102,241,0.5);
+}
+.feat h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.5rem; }
+.feat p { color: var(--text-muted); font-size: 0.95rem; line-height: 1.55; }
+
+/* COMPARISON */
+.compare {
+  max-width: 960px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+@media (max-width: 720px) { .compare { grid-template-columns: 1fr; } }
+.comp-card {
+  padding: 2rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--card-border);
+}
+.comp-card.bad { background: rgba(239,68,68,0.04); }
+.comp-card.good {
+  background: linear-gradient(180deg, rgba(99,102,241,0.12), rgba(168,85,247,0.08));
+  border-color: rgba(99,102,241,0.4);
+  box-shadow: 0 20px 60px -20px rgba(99,102,241,0.3);
+}
+.comp-card h3 {
+  font-size: 1.25rem;
+  font-weight: 800;
+  margin-bottom: 1.25rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.comp-card ul { list-style: none; display: flex; flex-direction: column; gap: 0.75rem; }
+.comp-card li {
+  display: flex; align-items: flex-start; gap: 0.75rem;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+.comp-card li .mark {
+  flex-shrink: 0;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+.comp-card.bad li .mark { background: rgba(239,68,68,0.15); color: #f87171; }
+.comp-card.good li .mark { background: rgba(34,197,94,0.15); color: #4ade80; }
+.comp-card.good li { color: #e2e8f0; }
+
+/* TESTIMONIALS */
+.testimonials { background: var(--bg-soft); }
+.testi-grid {
+  max-width: var(--max);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+.testi {
+  padding: 1.75rem;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+}
+.testi .stars { margin-bottom: 1rem; font-size: 0.95rem; }
+.testi p { color: #e2e8f0; font-size: 0.98rem; line-height: 1.55; margin-bottom: 1.25rem; flex: 1; }
+.testi-user { display: flex; align-items: center; gap: 0.75rem; }
+.testi-av {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700;
+  font-size: 0.95rem;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+}
+.testi-user .name { font-weight: 600; font-size: 0.95rem; }
+.testi-user .role { font-size: 0.8rem; color: var(--text-muted); }
+
+/* PRICING */
+.pricing-grid {
+  max-width: 960px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+@media (max-width: 780px) { .pricing-grid { grid-template-columns: 1fr; max-width: 420px; } }
+.plan {
+  padding: 2.5rem 2rem;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 20px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.plan.featured {
+  background: linear-gradient(180deg, rgba(99,102,241,0.15), rgba(168,85,247,0.08));
+  border-color: rgba(99,102,241,0.5);
+  box-shadow: 0 30px 80px -20px rgba(99,102,241,0.4);
+  transform: scale(1.02);
+}
+@media (max-width: 780px) { .plan.featured { transform: none; } }
+.plan-badge {
+  position: absolute;
+  top: -12px; left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  box-shadow: 0 8px 20px -4px rgba(99,102,241,0.6);
+}
+.plan h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.35rem; }
+.plan .plan-desc { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+.plan .price {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+.plan .price .amount { font-size: 3rem; font-weight: 900; letter-spacing: -0.03em; }
+.plan .price .per { color: var(--text-muted); font-size: 0.95rem; }
+.plan .price-note { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.75rem; }
+.plan ul { list-style: none; display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 2rem; flex: 1; }
+.plan li { display: flex; align-items: flex-start; gap: 0.6rem; font-size: 0.95rem; color: #cbd5e1; }
+.plan li::before {
+  content: '✓';
+  color: var(--success);
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.plan .btn { width: 100%; }
+
+/* FAQ */
+.faq-list { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 0.75rem; }
+.faq-item {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.faq-q {
+  width: 100%;
+  padding: 1.25rem 1.5rem;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.faq-q span { flex: 1; }
+.faq-q::after {
+  content: '+';
+  font-size: 1.5rem;
+  font-weight: 300;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+.faq-item.open .faq-q::after { transform: rotate(45deg); }
+.faq-a {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  padding: 0 1.5rem;
+}
+.faq-item.open .faq-a {
+  max-height: 400px;
+  padding: 0 1.5rem 1.25rem;
+}
+
+/* FINAL CTA */
+.final {
+  padding: 6rem 1.5rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.final-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(800px 400px at 50% 50%, rgba(99,102,241,0.25), transparent 60%),
+    radial-gradient(500px 300px at 30% 20%, rgba(37,211,102,0.15), transparent 60%);
+  pointer-events: none;
+}
+.final-inner { position: relative; max-width: 720px; margin: 0 auto; }
+.final h2 {
+  font-size: clamp(2rem, 4.5vw, 3.4rem);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-bottom: 1.25rem;
+}
+.final p {
+  color: var(--text-muted);
+  font-size: 1.15rem;
+  margin-bottom: 2rem;
+}
+
+/* FOOTER */
+footer {
+  padding: 3rem 1.5rem 2rem;
+  border-top: 1px solid var(--card-border);
+  background: var(--bg-soft);
+}
+.foot-inner {
+  max-width: var(--max);
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  justify-content: space-between;
+  align-items: center;
+}
+.foot-links { display: flex; gap: 1.75rem; flex-wrap: wrap; }
+.foot-links a { color: var(--text-muted); font-size: 0.9rem; transition: color 0.2s; }
+.foot-links a:hover { color: var(--text); }
+.foot-copy { color: var(--text-dim); font-size: 0.85rem; }
+
+/* FLOATING WHATSAPP */
+.float-wa {
+  position: fixed;
+  bottom: 1.5rem; right: 1.5rem;
+  width: 58px; height: 58px;
+  background: var(--green);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 30px -6px rgba(37,211,102,0.55);
+  z-index: 40;
+  transition: transform 0.2s;
+  animation: waPulse 2s infinite;
+}
+.float-wa:hover { transform: scale(1.08); }
+@keyframes waPulse {
+  0%, 100% { box-shadow: 0 10px 30px -6px rgba(37,211,102,0.55), 0 0 0 0 rgba(37,211,102,0.5); }
+  50% { box-shadow: 0 10px 30px -6px rgba(37,211,102,0.55), 0 0 0 14px rgba(37,211,102,0); }
+}
+.float-wa svg { width: 30px; height: 30px; fill: white; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="logo"><span class="logo-dot"></span>CoachKai</a>
+    <div class="nav-links">
+      <a href="#como-funciona">Cómo funciona</a>
+      <a href="#features">Funciones</a>
+      <a href="#precio">Precio</a>
+      <a href="#faq">FAQ</a>
+      <a href="#cta" class="btn-nav">Empezar</a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-grid"></div>
+  <div class="hero-inner">
+    <div>
+      <div class="pill"><span class="pill-dot"></span> Disponible 24/7 en WhatsApp</div>
+      <h1>Tu coach de nutrición <span class="gradient">vive en tu WhatsApp</span></h1>
+      <p class="lead">Mandá una foto de tu plato y en 10 segundos sabés qué comiste, cuántas calorías tiene y qué ajustar. Sin apps nuevas, sin planillas, sin vueltas.</p>
+      <div class="cta-row">
+        <a href="#cta" class="btn btn-primary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
+          Empezar gratis
+        </a>
+        <a href="#como-funciona" class="btn btn-ghost">Ver cómo funciona →</a>
+      </div>
+      <div class="hero-social">
+        <div class="avatars">
+          <div class="av">M</div>
+          <div class="av">L</div>
+          <div class="av">J</div>
+          <div class="av">+</div>
+        </div>
+        <div>
+          <div class="stars">★★★★★</div>
+          <div style="font-size:0.85rem;">+2.000 personas ya lo usan</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PHONE -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="phone-notch"></div>
+          <div class="wa-header">
+            <div class="wa-avatar">K</div>
+            <div>
+              <div class="wa-name">CoachKai</div>
+              <div class="wa-status">🟢 en línea</div>
+            </div>
+          </div>
+          <div class="wa-chat">
+            <div class="msg out photo">
+              <div class="ph"></div>
+              <div class="cap">📎 mi almuerzo</div>
+            </div>
+            <div class="msg in">Buenísimo, Rafa 🙌 Veo pollo grillado, arroz integral y ensalada.</div>
+            <div class="msg in">Aprox <b>580 kcal</b> · 42g proteína · 55g carbos · 18g grasas. Vas 10/10 con tu objetivo de hoy 🔥</div>
+            <div class="msg out">¿Y si agrego palta?</div>
+            <div class="msg in">Sumás +120 kcal y grasas buenas. Dale tranqui, te queda margen 👌</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PROBLEM -->
+<section class="problem" id="problem">
+  <div class="section-head">
+    <span class="eyebrow">El problema</span>
+    <h2 class="section-title">Contar calorías no debería arruinarte el día</h2>
+    <p>Todos sabemos que deberíamos comer mejor. Pero las apps son tediosas, las planillas mueren a los 3 días y contratar un nutricionista cuesta una fortuna.</p>
+  </div>
+  <div class="problem-grid">
+    <div class="prob-card">
+      <div class="ico">😩</div>
+      <h3>Apps que odiás usar</h3>
+      <p>Abrís MyFitnessPal, buscás "pollo a la plancha" entre 400 opciones, medís en gramos, repetís 4 veces al día. Abandonás en una semana.</p>
+    </div>
+    <div class="prob-card">
+      <div class="ico">💸</div>
+      <h3>Nutricionistas caros</h3>
+      <p>Consulta cada 15 días, plan en PDF que no seguís, $40.000 al mes. Si te sale algo fuera del plan, no sabés qué hacer.</p>
+    </div>
+    <div class="prob-card">
+      <div class="ico">🤯</div>
+      <h3>Info contradictoria</h3>
+      <p>Keto, ayuno, IIFYM, paleo, low carb. Cada influencer dice algo distinto. Terminás sin saber qué comer ni por qué.</p>
+    </div>
+    <div class="prob-card">
+      <div class="ico">⏰</div>
+      <h3>Cero constancia</h3>
+      <p>Sin alguien que te pregunte qué comiste, el plan dura lo que un helado al sol. La voluntad no alcanza.</p>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section id="como-funciona">
+  <div class="section-head">
+    <span class="eyebrow">Cómo funciona</span>
+    <h2 class="section-title">Tres pasos. Cero fricción.</h2>
+    <p>No hay apps para descargar. No hay planillas para completar. Solo el chat que ya usás todos los días.</p>
+  </div>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-icon">💬</div>
+      <h3>Escribinos al WhatsApp</h3>
+      <p>Te pregunta tu objetivo, edad, peso, actividad y preferencias. En 3 minutos arma tu plan personalizado.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-icon">📸</div>
+      <h3>Mandá foto de tu comida</h3>
+      <p>O escribila en texto. La IA identifica ingredientes, calcula calorías, proteínas, carbos y grasas al toque.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-icon">🚀</div>
+      <h3>Ajustá en tiempo real</h3>
+      <p>Te avisa si te pasás, te recuerda comidas, te motiva y responde preguntas. Como un coach, pero siempre disponible.</p>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+  <div class="section-head">
+    <span class="eyebrow">Todo lo que hace</span>
+    <h2 class="section-title">Mucho más que contar calorías</h2>
+  </div>
+  <div class="feat-grid">
+    <div class="feat">
+      <div class="feat-ico">📸</div>
+      <h3>Análisis de fotos</h3>
+      <p>Identifica ingredientes y calcula macros con IA visual. Funciona con platos caseros, de restaurante y delivery.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-ico">🎯</div>
+      <h3>Plan personalizado</h3>
+      <p>Calcula tu requerimiento calórico y macros según tu objetivo: bajar grasa, ganar músculo o mantener.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-ico">⏰</div>
+      <h3>Recordatorios smart</h3>
+      <p>Te avisa los horarios de comidas, te pregunta cómo te fue y se adapta a tu rutina.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-ico">🎙️</div>
+      <h3>Audio + texto</h3>
+      <p>Mandale un mensaje de voz mientras cocinás. Lo transcribe y lo entiende igual.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-ico">📊</div>
+      <h3>Reportes semanales</h3>
+      <p>PDF con tu progreso, adherencia al plan y sugerencias para la semana siguiente.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-ico">🧠</div>
+      <h3>Memoria del coach</h3>
+      <p>Recuerda lo que comés habitualmente, tus alergias, lo que te cae mal y tus gustos.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-ico">💪</div>
+      <h3>Respuestas 24/7</h3>
+      <p>¿Puedo comer esto? ¿Qué hago si me salteé el almuerzo? Respuesta en segundos, sin juzgarte.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-ico">🔒</div>
+      <h3>Privado y seguro</h3>
+      <p>Tus datos son tuyos. Encriptado end-to-end por WhatsApp. No vendemos nada a nadie.</p>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARISON -->
+<section>
+  <div class="section-head">
+    <span class="eyebrow">La diferencia</span>
+    <h2 class="section-title">CoachKai vs. lo que ya probaste</h2>
+  </div>
+  <div class="compare">
+    <div class="comp-card bad">
+      <h3>😕 Apps tradicionales + Nutricionista</h3>
+      <ul>
+        <li><span class="mark">✕</span> Descargar una app más (y abrirla todos los días)</li>
+        <li><span class="mark">✕</span> Buscar cada alimento a mano</li>
+        <li><span class="mark">✕</span> Consultas cada 15 días</li>
+        <li><span class="mark">✕</span> $30.000 - $50.000 por mes</li>
+        <li><span class="mark">✕</span> Nadie te banca en tiempo real</li>
+        <li><span class="mark">✕</span> Abandonás en 2 semanas</li>
+      </ul>
+    </div>
+    <div class="comp-card good">
+      <h3>🚀 CoachKai</h3>
+      <ul>
+        <li><span class="mark">✓</span> En el WhatsApp que ya tenés abierto</li>
+        <li><span class="mark">✓</span> Mandás foto y listo</li>
+        <li><span class="mark">✓</span> Disponible 24/7, todos los días</li>
+        <li><span class="mark">✓</span> Desde $6.999/mes</li>
+        <li><span class="mark">✓</span> Respuestas en 10 segundos</li>
+        <li><span class="mark">✓</span> 85% sigue a los 3 meses</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section class="testimonials">
+  <div class="section-head">
+    <span class="eyebrow">Historias reales</span>
+    <h2 class="section-title">Gente que bajó la bandera</h2>
+  </div>
+  <div class="testi-grid">
+    <div class="testi">
+      <div class="stars">★★★★★</div>
+      <p>"Bajé 7 kilos en 3 meses sin dietas raras. Mando foto de lo que como y listo. Es el único que me duró más de un mes."</p>
+      <div class="testi-user">
+        <div class="testi-av">M</div>
+        <div>
+          <div class="name">Martín C.</div>
+          <div class="role">Buenos Aires · -7kg en 12 semanas</div>
+        </div>
+      </div>
+    </div>
+    <div class="testi">
+      <div class="stars">★★★★★</div>
+      <p>"Soy mamá, trabajo full time y odio las apps de comida. Esto me salvó: mando audio al coach desde la cocina y me dice qué comer."</p>
+      <div class="testi-user">
+        <div class="testi-av" style="background:linear-gradient(135deg,#f472b6,#fb7185)">L</div>
+        <div>
+          <div class="name">Luciana P.</div>
+          <div class="role">Córdoba · mamá de 2</div>
+        </div>
+      </div>
+    </div>
+    <div class="testi">
+      <div class="stars">★★★★★</div>
+      <p>"Tenía un nutricionista que me salía 35 lucas. Este me responde en segundos cuando estoy en un asado. Zero culpa y avanzo igual."</p>
+      <div class="testi-user">
+        <div class="testi-av" style="background:linear-gradient(135deg,#34d399,#22d3ee)">J</div>
+        <div>
+          <div class="name">Juan M.</div>
+          <div class="role">Rosario · -12kg</div>
+        </div>
+      </div>
+    </div>
+    <div class="testi">
+      <div class="stars">★★★★★</div>
+      <p>"Soy cero constante con las cosas y esto me engancha porque no tengo que hacer casi nada. Me pregunta y yo contesto, listo."</p>
+      <div class="testi-user">
+        <div class="testi-av" style="background:linear-gradient(135deg,#fbbf24,#f97316)">S</div>
+        <div>
+          <div class="name">Sofía R.</div>
+          <div class="role">Mendoza · ganó 4kg músculo</div>
+        </div>
+      </div>
+    </div>
+    <div class="testi">
+      <div class="stars">★★★★★</div>
+      <p>"Entreno crossfit y necesitaba comer más sin volverme loco. En dos meses gané fuerza y me volví a ver los abs. Sin planilla."</p>
+      <div class="testi-user">
+        <div class="testi-av" style="background:linear-gradient(135deg,#a78bfa,#6366f1)">F</div>
+        <div>
+          <div class="name">Federico T.</div>
+          <div class="role">La Plata · crossfitter</div>
+        </div>
+      </div>
+    </div>
+    <div class="testi">
+      <div class="stars">★★★★★</div>
+      <p>"Lo mejor es que no me reta. Si me como una pizza el sábado me dice cómo compensar sin drama. Lo sentís como un amigo."</p>
+      <div class="testi-user">
+        <div class="testi-av" style="background:linear-gradient(135deg,#f87171,#ec4899)">V</div>
+        <div>
+          <div class="name">Valeria O.</div>
+          <div class="role">Neuquén · -5kg</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section id="precio">
+  <div class="section-head">
+    <span class="eyebrow">Planes simples</span>
+    <h2 class="section-title">Menos que un café por día</h2>
+    <p>Probá 7 días gratis. Si no te cambia la relación con la comida, no pagás nada.</p>
+  </div>
+  <div class="pricing-grid">
+    <div class="plan">
+      <h3>Mensual</h3>
+      <div class="plan-desc">Ideal para probar</div>
+      <div class="price">
+        <span class="amount">$7.999</span>
+        <span class="per">/mes</span>
+      </div>
+      <div class="price-note">7 días gratis, sin tarjeta</div>
+      <ul>
+        <li>Análisis ilimitado de fotos</li>
+        <li>Plan nutricional personalizado</li>
+        <li>Recordatorios y coach 24/7</li>
+        <li>Audio + texto + imagen</li>
+        <li>Reporte semanal en PDF</li>
+      </ul>
+      <a href="#cta" class="btn btn-ghost">Empezar ahora</a>
+    </div>
+    <div class="plan featured">
+      <div class="plan-badge">2 meses gratis</div>
+      <h3>Anual</h3>
+      <div class="plan-desc">El plan que más elige la gente</div>
+      <div class="price">
+        <span class="amount">$6.666</span>
+        <span class="per">/mes</span>
+      </div>
+      <div class="price-note">$79.990/año · un solo pago · ahorrás $15.998</div>
+      <ul>
+        <li>Todo lo del plan mensual</li>
+        <li><b>2 meses gratis</b></li>
+        <li>Prioridad en respuestas</li>
+        <li>Plan de entrenamiento integrado</li>
+        <li>Soporte humano + IA</li>
+        <li>Garantía 30 días o devolvemos tu plata</li>
+      </ul>
+      <a href="#cta" class="btn btn-primary">Elegir anual →</a>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq" style="background:var(--bg-soft);">
+  <div class="section-head">
+    <span class="eyebrow">Preguntas</span>
+    <h2 class="section-title">Lo que todos preguntan</h2>
+  </div>
+  <div class="faq-list">
+    <div class="faq-item">
+      <button class="faq-q"><span>¿Necesito bajar una app?</span></button>
+      <div class="faq-a"><p>No. Todo pasa dentro de WhatsApp, la app que ya tenés. Solo guardás un contacto y listo.</p></div>
+    </div>
+    <div class="faq-item">
+      <button class="faq-q"><span>¿Qué precisión tiene el análisis de fotos?</span></button>
+      <div class="faq-a"><p>Alta — usa IA visual de última generación (Gemini 2.5). En comidas típicas identifica ingredientes y porciones con ~90% de precisión. Si algo no queda claro, te lo pregunta para afinar.</p></div>
+    </div>
+    <div class="faq-item">
+      <button class="faq-q"><span>¿Reemplaza a un nutricionista?</span></button>
+      <div class="faq-a"><p>Para el 90% de las personas que quieren comer mejor, sí. Si tenés una patología específica (diabetes, celiaquía, embarazo de riesgo), siempre recomendamos acompañarlo con un profesional.</p></div>
+    </div>
+    <div class="faq-item">
+      <button class="faq-q"><span>¿Se cancela fácil?</span></button>
+      <div class="faq-a"><p>Sí. Un mensaje al coach y listo, en segundos. Sin vueltas, sin "esperá a fin de mes", sin retención telefónica.</p></div>
+    </div>
+    <div class="faq-item">
+      <button class="faq-q"><span>¿Mis datos están seguros?</span></button>
+      <div class="faq-a"><p>Todo viaja por WhatsApp con encriptación end-to-end. No vendemos datos, no hacemos ads, no compartimos con terceros. Podés pedir borrar todo cuando quieras.</p></div>
+    </div>
+    <div class="faq-item">
+      <button class="faq-q"><span>¿Sirve si cocino diferente o como afuera?</span></button>
+      <div class="faq-a"><p>Sí, está pensado para eso. Foto al asado, foto al delivery, foto al tupper del laburo. Se adapta a lo que comés, no te obliga a comer lo que no querés.</p></div>
+    </div>
+    <div class="faq-item">
+      <button class="faq-q"><span>¿Cómo pago?</span></button>
+      <div class="faq-a"><p>Con MercadoPago (débito, crédito, dinero en cuenta). Débito automático mensual o un solo pago anual. Podés pausar o cancelar cuando quieras.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="final" id="cta">
+  <div class="final-bg"></div>
+  <div class="final-inner">
+    <h2>Tu próxima comida puede ser la primera de una vida distinta.</h2>
+    <p>Empezá gratis. 7 días. Sin tarjeta. Sin vueltas.</p>
+    <a href="https://wa.me/5491112345678?text=Hola%20quiero%20empezar%20con%20CoachKai" class="btn btn-primary" style="padding: 1.15rem 2rem; font-size: 1.1rem;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
+      Empezar ahora por WhatsApp
+    </a>
+    <p style="margin-top:1rem; font-size:0.9rem; color:var(--text-dim);">⚡ Activación instantánea · 🔒 Pago seguro · 🇦🇷 Soporte en Argentina</p>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="foot-inner">
+    <div class="logo"><span class="logo-dot"></span>CoachKai</div>
+    <div class="foot-links">
+      <a href="#como-funciona">Cómo funciona</a>
+      <a href="#precio">Precios</a>
+      <a href="#faq">FAQ</a>
+      <a href="/privacy">Privacidad</a>
+      <a href="/terms">Términos</a>
+      <a href="mailto:hola@coachkai.app">Contacto</a>
+    </div>
+    <div class="foot-copy">© 2026 CoachKai · Hecho en Argentina 🇦🇷</div>
+  </div>
+</footer>
+
+<!-- FLOATING WA -->
+<a href="https://wa.me/5491112345678?text=Hola%20quiero%20info%20de%20CoachKai" class="float-wa" aria-label="Chatear por WhatsApp">
+  <svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
+</a>
+
+<script>
+// FAQ toggle
+document.querySelectorAll('.faq-q').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const item = btn.parentElement;
+    const isOpen = item.classList.contains('open');
+    document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+    if (!isOpen) item.classList.add('open');
+  });
+});
+
+// Smooth reveal on scroll
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.style.opacity = '1';
+      e.target.style.transform = 'translateY(0)';
+    }
+  });
+}, { threshold: 0.1 });
+
+document.querySelectorAll('.prob-card, .step, .feat, .testi, .plan, .faq-item, .comp-card').forEach(el => {
+  el.style.opacity = '0';
+  el.style.transform = 'translateY(20px)';
+  el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+  observer.observe(el);
+});
+</script>
+
+</body>
+</html>
