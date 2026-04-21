@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "buildCommand": "echo 'Static site, no build needed'",
+  "installCommand": "echo 'No dependencies'",
+  "outputDirectory": ".",
+  "framework": null,
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/", "destination": "/landing.html" }
+  ]
+}

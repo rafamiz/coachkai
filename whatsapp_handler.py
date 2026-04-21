@@ -14,8 +14,11 @@ import pytz
 
 import ai
 import db
+import payments
 
 logger = logging.getLogger(__name__)
+
+APP_URL = os.environ.get("APP_URL", "https://coachkai-production.up.railway.app")
 
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN  = os.environ.get("TWILIO_AUTH_TOKEN", "")
@@ -36,6 +39,8 @@ def _phone_to_tid(phone: str) -> int:
 def get_or_create_user(numero: str) -> dict:
     user = db.get_user_by_phone(numero)
     if user is None:
+        # Create lead record for tracking; user record is created later
+        db.upsert_lead(numero, source="whatsapp")
         tid = _phone_to_tid(numero)
         db.upsert_user(tid, phone=numero)
         user = db.get_user_by_phone(numero)
@@ -43,18 +48,49 @@ def get_or_create_user(numero: str) -> dict:
 
 
 async def download_media_to_file(url: str) -> str:
-    """Download Twilio media, save to photos/, return local file path."""
+    """Download Twilio media using requests (sync in executor), save to photos/."""
+    import asyncio
+    import requests as _req
+
     os.makedirs("photos", exist_ok=True)
-    auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.get(url, auth=auth, follow_redirects=True)
-        content_type = r.headers.get("content-type", "image/jpeg")
-        ext = content_type.split("/")[-1].split(";")[0].strip().lower()
-        if ext not in ("jpeg", "jpg", "png", "webp"):
-            ext = "jpg"
-        fname = f"photos/wa_{uuid.uuid4().hex}.{ext}"
-        with open(fname, "wb") as f:
-            f.write(r.content)
+    sid = TWILIO_ACCOUNT_SID.strip()
+    token = TWILIO_AUTH_TOKEN.strip()
+    logger.info(f"[download] SID=len{len(sid)}, TOKEN=len{len(token)}, url={url[:60]}")
+
+    IMAGE_MAGIC = [
+        (b'\xff\xd8\xff', "jpg"),
+        (b'\x89PNG\r\n\x1a\n', "png"),
+        (b'RIFF', "webp"),
+        (b'GIF8', "gif"),
+    ]
+
+    def _sync_fetch():
+        r = _req.get(url, auth=(sid, token), timeout=30, allow_redirects=True)
+        return r.status_code, r.headers.get("content-type", ""), r.content
+
+    loop = asyncio.get_event_loop()
+    status, content_type, body = await loop.run_in_executor(None, _sync_fetch)
+
+    first50 = body[:50].hex() if body else "(empty)"
+    logger.info(f"[download] status={status}, content_type={content_type}, size={len(body)}, first50={first50}")
+
+    # Verificar que es imagen real
+    is_image = any(body[:len(magic)] == magic for magic, _ in IMAGE_MAGIC)
+    if not is_image:
+        preview = body[:200].decode("utf-8", errors="replace")
+        logger.error(f"[download] NOT an image! Preview: {preview}")
+        raise ValueError(f"Non-image response (status={status}): {preview[:80]}")
+
+    ext = "jpg"
+    for magic, magic_ext in IMAGE_MAGIC:
+        if body[:len(magic)] == magic:
+            ext = magic_ext
+            break
+
+    fname = f"photos/wa_{uuid.uuid4().hex}.{ext}"
+    with open(fname, "wb") as f:
+        f.write(body)
+    logger.info(f"[download] saved to {fname}")
     return fname
 
 
@@ -65,6 +101,47 @@ async def download_media_to_file(url: str) -> str:
 GOALS = {"1": "lose_weight", "2": "gain_muscle", "3": "maintain"}
 ACTIVITIES = {"1": "sedentary", "2": "lightly_active", "3": "active", "4": "very_active"}
 COACH_MODES = {"1": "mentor", "2": "roaster"}
+
+
+def _check_access(tid: int) -> str | None:
+    """
+    Check if user has active subscription or trial.
+    Returns None if access is granted, or a blocking message if not.
+    """
+    if db.is_user_active(tid):
+        return None
+
+    sub = db.get_subscription(tid)
+    user = db.get_user(tid)
+    phone = user.get("phone", "") if user else ""
+
+    # No subscription or pending_payment — must enter card first
+    if not sub or sub.get("status") == "pending_payment":
+        return (
+            "Para empezar tus 7 dias gratis, necesitas registrar tu tarjeta. "
+            "No se te cobra nada hasta el dia 8.\n"
+            f"👉 {APP_URL}/subscription/payment?phone={phone}"
+        )
+
+    if sub.get("status") == "trial":
+        # Trial expired
+        return (
+            "Tu periodo de prueba gratuito termino.\n\n"
+            "Para seguir usando CoachKai, activa tu suscripcion:\n"
+            f"👉 {APP_URL}/subscription/payment?phone={phone}\n\n"
+            "Son solo unos segundos y despues seguis como siempre 💪"
+        )
+
+    if sub.get("status") in ("cancelled", "past_due"):
+        return (
+            "Tu suscripcion esta inactiva.\n\n"
+            "Reactiva tu plan para seguir usando CoachKai:\n"
+            f"👉 {APP_URL}/subscription/payment?phone={phone}\n\n"
+            "Te estamos esperando 💪"
+        )
+
+    # Fallback
+    return None
 
 
 # ------------------------------------------------------------------
@@ -99,6 +176,10 @@ async def handle_message(numero: str, text: str, media_url: str = None) -> str:
 
         # User is considered onboarded if onboarding_complete == 1
         if user.get("onboarding_complete") == 1:
+            # Check subscription/trial access before processing
+            block_msg = _check_access(tid)
+            if block_msg:
+                return block_msg
             return await _handle_main(user, tid, text, media_url)
 
         step = user.get("onboarding_step")
@@ -224,6 +305,7 @@ async def _handle_onboarding(user: dict, tid: int, step, text: str) -> str:
             "Comandos:\n"
             "/stats - resumen del dia\n"
             "/plan - ver tu plan\n"
+            "/dashboard - ver tu dashboard\n"
             "/coach - cambiar tipo de coach\n"
             "/reset - empezar de nuevo"
         )
@@ -277,6 +359,23 @@ async def _handle_main(user: dict, tid: int, text: str, media_url: str = None) -
     if text_lower.startswith("/plan"):
         return await _cmd_plan(user)
 
+    if text_lower.startswith("/dashboard"):
+        token = db.get_or_create_dashboard_token(tid)
+        return (
+            "Tu dashboard personal:\n"
+            f"👉 {APP_URL}/dashboard/{tid}?token={token}\n\n"
+            "Ahi podes ver tus calorias, macros y comidas del dia."
+        )
+
+    _CANCEL_PHRASES = [
+        "cancelar", "cancelar plan", "cancelar suscripcion", "cancelar suscripción",
+        "quiero cancelar", "baja mi plan", "darme de baja", "dar de baja",
+        "cancela mi plan", "cancela mi suscripcion", "no quiero seguir pagando",
+        "quiero cancelar mi plan", "nono quiero cancelar mi plan pago",
+    ]
+    if text_lower.startswith("/cancelar") or any(p in text_lower for p in _CANCEL_PHRASES):
+        return await _cmd_cancelar(user, tid)
+
     if text_lower.startswith("/coach"):
         db.upsert_user(tid, onboarding_step="awaiting_coach")
         return (
@@ -320,13 +419,25 @@ async def _handle_photo(user: dict, tid: int, text: str, media_url: str) -> str:
             coach_mode=user.get("coach_mode", "mentor"),
         )
         _persist_result(user, tid, result, history, text or "foto de comida")
-        return _extract_reply(result)
+        return _extract_reply(result, tid, user)
     except Exception as e:
         logger.error(f"[handler] photo process error for {tid}: {e}")
         return "No pude analizar la foto. Describe la comida con texto e intenta de nuevo."
 
 
+_DASHBOARD_KEYWORDS = [
+    "dashboard", "mi resumen", "ver mi progreso", "mis stats", "mis estadísticas",
+    "cuanto llevo", "cuánto llevo", "mi progreso", "ver mi plan",
+    "resumen de hoy", "como voy", "cómo voy", "ver dashboard", "mis comidas de hoy"
+]
+
 async def _handle_text(user: dict, tid: int, text: str) -> str:
+    # Auto-send dashboard if user asks about their progress
+    if any(kw in text.lower() for kw in _DASHBOARD_KEYWORDS):
+        token = db.get_or_create_dashboard_token(tid)
+        url = f"https://coachkai-production.up.railway.app/dashboard/{tid}?token={token}"
+        return f"Acá está tu resumen personalizado 📊\n{url}"
+
     try:
         history = db.get_chat_history(tid)
         result = await ai.process_message(
@@ -336,7 +447,7 @@ async def _handle_text(user: dict, tid: int, text: str) -> str:
             coach_mode=user.get("coach_mode", "mentor"),
         )
         _persist_result(user, tid, result, history, text)
-        return _extract_reply(result)
+        return _extract_reply(result, tid, user)
     except Exception as e:
         logger.error(f"[handler] process_message error for {tid}: {e}", exc_info=True)
         return "Hubo un error procesando tu mensaje. Intenta de nuevo."
@@ -346,9 +457,62 @@ async def _handle_text(user: dict, tid: int, text: str) -> str:
 # Persistence helpers
 # ------------------------------------------------------------------
 
-def _extract_reply(result: dict) -> str:
+def _daily_goal(user: dict) -> int:
+    """Estimate daily calorie goal based on user profile (Mifflin-St Jeor male)."""
+    weight = user.get("weight_kg") or 70
+    height = user.get("height_cm") or 170
+    age = user.get("age") or 25
+    goal = user.get("goal", "maintain")
+    activity = user.get("activity_level", "moderate")
+    bmr = 10 * weight + 6.25 * height - 5 * age + 5
+    activity_mult = {
+        "sedentary": 1.2, "light": 1.375, "lightly_active": 1.375,
+        "moderate": 1.55, "active": 1.725, "very_active": 1.9,
+    }
+    tdee = bmr * activity_mult.get(activity, 1.55)
+    if goal == "lose_weight":
+        tdee -= 400
+    elif goal == "gain_muscle":
+        tdee += 300
+    return int(tdee)
+
+
+def _format_meal_reply(result: dict, tid: int, user: dict) -> str:
+    """Build a formatted meal reply with macros and daily progress."""
+    meal = result.get("meal", {})
+    detected = (
+        meal.get("detected_food")
+        or meal.get("description")
+        or meal.get("detected", "comida")
+    )
+    calories = int(meal.get("calories_est") or meal.get("calories", 0) or 0)
+    proteins = float(meal.get("proteins_g", 0) or 0)
+    carbs = float(meal.get("carbs_g", 0) or 0)
+    fats = float(meal.get("fats_g", 0) or 0)
+
+    today_meals = db.get_today_meals(tid)
+    total_cal = sum(m.get("calories_est", 0) or 0 for m in today_meals)
+    daily = user.get("daily_calories") or _daily_goal(user)
+    remaining = max(0, daily - total_cal)
+
+    tip = result.get("tip") or meal.get("tip", "")
+
+    lines = [
+        f"✅ {detected} — ~{calories} kcal",
+        f"🥩 {proteins:.0f}g prot | 🍞 {carbs:.0f}g carbos | 🧈 {fats:.0f}g grasa",
+        f"📊 Hoy: {total_cal} / {daily} kcal (te quedan ~{remaining})",
+    ]
+    if tip:
+        lines.append(f"\n💬 {tip}")
+
+    return "\n".join(lines)
+
+
+def _extract_reply(result: dict, tid: int = None, user: dict = None) -> str:
     rtype = result.get("type", "text")
     if rtype == "meal":
+        if tid is not None and user is not None:
+            return _format_meal_reply(result, tid, user)
         return result.get("reply") or "Comida registrada."
     if rtype == "workout":
         return result.get("reply") or "Ejercicio registrado."
@@ -461,7 +625,7 @@ def _persist_result(user: dict, tid: int, result: dict, history: list, user_text
         if content:
             db.save_memory(tid, content, category)
 
-    reply_text = _extract_reply(result)
+    reply_text = _extract_reply(result, tid, user)
     new_history = history + [
         {"role": "user", "content": user_text},
         {"role": "assistant", "content": reply_text},
@@ -472,6 +636,46 @@ def _persist_result(user: dict, tid: int, result: dict, history: list, user_text
 # ------------------------------------------------------------------
 # Commands
 # ------------------------------------------------------------------
+
+async def _cmd_cancelar(user: dict, tid: int) -> str:
+    sub = db.get_subscription(tid)
+    if not sub or sub.get("status") in ("cancelled", "pending_payment"):
+        return "No tenes una suscripcion activa para cancelar."
+
+    if sub.get("status") == "trial":
+        return (
+            "Estás en tu periodo de prueba gratuito. No se te va a cobrar nada si no hacés nada.\n\n"
+            "Si igual querés cancelar para que no te cobren al día 8, hacelo desde MercadoPago:\n"
+            "👉 https://www.mercadopago.com.ar/subscriptions"
+        )
+
+    return (
+        "Para cancelar tu suscripcion, hacelo directamente desde MercadoPago:\n\n"
+        "👉 https://www.mercadopago.com.ar/subscriptions\n\n"
+        "Entrá con tu cuenta, buscá CoachKai y cancelá desde ahí. "
+        "Tu acceso se mantiene hasta que venza el periodo actual."
+    )
+
+    mp_id = sub.get("mp_preapproval_id")
+    if mp_id:
+        success = payments.cancel_preapproval(mp_id)
+        if success:
+            db.update_subscription(tid, status="cancelled")
+            return (
+                "Tu suscripcion fue cancelada. "
+                "Podes seguir usando CoachKai hasta que termine tu periodo actual.\n\n"
+                "Si cambias de idea, escribime y te paso el link para reactivar."
+            )
+        else:
+            return "No pude cancelar la suscripcion en este momento. Intenta de nuevo mas tarde."
+
+    # No MP id (e.g. trial only) — just cancel locally
+    db.update_subscription(tid, status="cancelled")
+    return (
+        "Tu suscripcion fue cancelada. "
+        "Si cambias de idea, escribime y te paso el link para reactivar."
+    )
+
 
 async def _cmd_stats(user: dict, tid: int) -> str:
     meals = db.get_today_meals(tid)

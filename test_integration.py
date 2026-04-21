@@ -19,7 +19,7 @@ pytestmark = pytest.mark.asyncio
 # Force test to use SQLite, no Postgres
 os.environ.pop("DATABASE_URL", None)
 # Dummy API key so ai.py doesn't complain
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
 # ---------------------------------------------------------------------------
 # Fixtures

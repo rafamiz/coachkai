@@ -1,0 +1,10 @@
+node_modules
+apps
+__pycache__
+*.py
+*.pyc
+supabase
+marketing
+.claude
+test_*.py
+_*.py

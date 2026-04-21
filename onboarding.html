@@ -495,21 +495,27 @@ input::placeholder { color: #4a4a6a; }
     <div class="plans-row">
       <div class="plan-card" id="planMonthly" onclick="pickPlan('monthly')">
         <div class="plan-name">Plan Mensual</div>
-        <div class="plan-old"><s>$15 USD</s></div>
-        <div class="plan-price">$9 <span>/mes</span></div>
+        <div class="plan-old"><s>$14.999</s></div>
+        <div class="plan-price">$8.999 <span>/mes</span></div>
         <div class="plan-note">Cancelá cuando quieras</div>
       </div>
       <div class="plan-card featured selected" id="planAnnual" onclick="pickPlan('annual')">
         <div class="plan-badge">MÁS POPULAR</div>
         <div class="plan-name">Plan Anual</div>
-        <div class="plan-old"><s>$108 USD</s></div>
-        <div class="plan-price">$59 <span>/año</span></div>
-        <div class="plan-equiv">= $4.90/mes</div>
+        <div class="plan-old"><s>$107.988</s></div>
+        <div class="plan-price">$58.999 <span>/año</span></div>
+        <div class="plan-equiv">= $4.916/mes</div>
         <div class="plan-save">Ahorrás 45%</div>
       </div>
     </div>
     <div class="gap-md"></div>
+    <div style="width:100%;max-width:340px;margin:0 auto 0.75rem">
+      <input type="email" id="emailInput" placeholder="Tu email (para MercadoPago)" autocomplete="email"
+        style="width:100%;padding:0.85rem 1rem;border-radius:12px;border:1px solid var(--card-border);background:var(--card);color:var(--text);font-family:inherit;font-size:0.95rem;outline:none;transition:border-color 0.2s"
+        onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--card-border)'" />
+    </div>
     <button class="btn btn-primary" id="ctaBtn" onclick="completeOnboarding()">Empezar prueba gratuita →</button>
+    <div id="paywallError" style="color:#ef4444;font-size:0.85rem;text-align:center;margin-top:0.5rem;display:none"></div>
     <div class="gap-sm"></div>
     <div class="paywall-trust">🔒 Pago seguro — cancelá en cualquier momento</div>
     <div class="gap-sm"></div>
@@ -635,7 +641,23 @@ function pickPlan(plan) {
 }
 
 async function completeOnboarding() {
+  const errEl = document.getElementById('paywallError');
+  errEl.style.display = 'none';
+
+  const emailVal = (document.getElementById('emailInput').value || '').trim();
+  if (!emailVal || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal)) {
+    errEl.textContent = 'Ingresá un email válido para continuar.';
+    errEl.style.display = 'block';
+    document.getElementById('emailInput').focus();
+    return;
+  }
+
+  const btn = document.getElementById('ctaBtn');
+  btn.textContent = 'Procesando...';
+  btn.disabled = true;
+
   try {
+    // Save onboarding data first
     await fetch('/api/onboarding/complete', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -650,13 +672,26 @@ async function completeOnboarding() {
         coach_mode: data.coach || 'mentor',
       })
     });
+
+    // Create MP checkout
+    const res = await fetch('/api/subscription/checkout?phone=' + encodeURIComponent(data.phone) + '&email=' + encodeURIComponent(emailVal) + '&plan=' + selectedPlan);
+    const json = await res.json();
+
+    if (json.ok && json.checkout_url) {
+      window.location.href = json.checkout_url;
+    } else {
+      errEl.textContent = json.error || 'Error al procesar. Intentá de nuevo.';
+      errEl.style.display = 'block';
+      btn.textContent = 'Empezar prueba gratuita →';
+      btn.disabled = false;
+    }
   } catch(e) {
-    console.error('onboarding save failed', e);
+    console.error('checkout failed', e);
+    errEl.textContent = 'Error de conexión. Intentá de nuevo.';
+    errEl.style.display = 'block';
+    btn.textContent = 'Empezar prueba gratuita →';
+    btn.disabled = false;
   }
-  const msg = selectedPlan === 'annual'
-    ? 'Hola! Quiero el plan anual de CoachKai'
-    : 'Hola! Quiero el plan mensual de CoachKai';
-  window.open('https://wa.me/14155238886?text=' + encodeURIComponent(msg), '_blank');
 }
 
 function showResults() {

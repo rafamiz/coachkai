@@ -1,63 +1,40 @@
 import pytz
 import base64
-
-
-
 import os
-
-
-
-import anthropic
-
-
+from google import genai
+from google.genai import types
 
 
 
 
 
 _client = None
+_vision_client = None
 
 
 
 
 
-
-
-
-
-
-
-def get_client():
-
-
-
+def _get_client():
     global _client
-
-
-
     if _client is None:
-
-
-
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
-
-
-
+        key = os.environ.get("GEMINI_API_KEY", "")
         import logging
-
-
-
-        logging.getLogger(__name__).info(f"[ai] API key loaded: {'YES (len=' + str(len(key)) + ')' if key else 'NO - KEY MISSING'}")
-
-
-
-        _client = anthropic.AsyncAnthropic(api_key=key)
-
-
-
+        logging.getLogger(__name__).info(f"[ai] Gemini API key loaded: {'YES (len=' + str(len(key)) + ')' if key else 'NO - KEY MISSING'}")
+        _client = genai.Client(api_key=key)
     return _client
 
 
+def _get_vision_client():
+    """Cliente con api_version=v1 para modelos gemini-1.5-x (stable, soportan vision)."""
+    global _vision_client
+    if _vision_client is None:
+        key = os.environ.get("GEMINI_API_KEY", "")
+        _vision_client = genai.Client(
+            api_key=key,
+            http_options=types.HttpOptions(api_version="v1"),
+        )
+    return _vision_client
 
 
 
@@ -67,27 +44,110 @@ def get_client():
 
 
 
-MODEL = "claude-haiku-4-5"
+
+
+MODEL = "gemini-2.5-flash-lite"          # texto — barato y rápido
+VISION_MODEL = "gemini-2.5-flash-lite"   # fotos — mismo modelo que texto, multimodal ok
 
 
 
 
 
 
-
-# Cost tracking (Haiku pricing: $0.80/MTok input, $4.00/MTok output)
-
-
-
-_COST_INPUT = 0.80 / 1_000_000
-
-
-
-_COST_OUTPUT = 4.00 / 1_000_000
+# Cost tracking (Gemini 2.0 Flash: $0.10/MTok input, $0.40/MTok output)
+_COST_INPUT = 0.10 / 1_000_000
+_COST_OUTPUT = 0.40 / 1_000_000
 
 
 
 _turn_cost: float = 0.0
+
+
+def _to_gemini_tool(anthropic_tool: dict) -> dict:
+    """Convert an Anthropic tool definition to Gemini function_declaration format."""
+    schema = anthropic_tool["input_schema"].copy()
+    # Gemini doesn't support top-level 'required' in the same way for all types,
+    # but genai library handles it. We keep it as-is.
+    return {
+        "name": anthropic_tool["name"],
+        "description": anthropic_tool.get("description", ""),
+        "parameters": schema,
+    }
+
+
+def _anthropic_to_gemini_history(messages: list, system: str = None) -> list:
+    """Convert message history to Gemini contents format.
+
+    Handles both string content, dict-based Anthropic format,
+    and native types.Part objects (from process_message photo handling).
+    """
+    contents = []
+    for msg in messages:
+        role = "user" if msg["role"] == "user" else "model"
+        c = msg.get("content", "")
+        if isinstance(c, str):
+            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=c)]))
+        elif isinstance(c, list):
+            parts = []
+            for block in c:
+                # Already a types.Part object (photo from process_message)
+                if isinstance(block, types.Part):
+                    parts.append(block)
+                elif isinstance(block, dict):
+                    if block.get("type") == "text":
+                        parts.append(types.Part.from_text(text=block["text"]))
+            if parts:
+                contents.append(types.Content(role=role, parts=parts))
+    return contents
+
+
+async def _gemini_generate(system: str, messages: list, tools: list = None, max_tokens: int = 600, model: str = None):
+    """Call Gemini API with system instruction, messages, and optional tools."""
+    global _turn_cost
+
+    use_model = model or MODEL
+    client = _get_client()
+
+    gemini_tools = None
+    if tools:
+        func_declarations = [_to_gemini_tool(t) for t in tools]
+        gemini_tools = [types.Tool(function_declarations=func_declarations)]
+
+    contents = _anthropic_to_gemini_history(messages)
+
+    resp = await client.aio.models.generate_content(
+        model=use_model,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system,
+            max_output_tokens=max_tokens,
+            temperature=0.3,
+            tools=gemini_tools,
+        ),
+    )
+
+    # Track cost
+    if hasattr(resp, 'usage_metadata') and resp.usage_metadata:
+        _turn_cost += (resp.usage_metadata.prompt_token_count or 0) * _COST_INPUT
+        _turn_cost += (resp.usage_metadata.candidates_token_count or 0) * _COST_OUTPUT
+
+    return resp
+
+
+def _get_text_from_response(resp) -> str:
+    """Extract text from a Gemini response."""
+    for part in (resp.candidates[0].content.parts if resp.candidates else []):
+        if hasattr(part, 'text') and part.text:
+            return part.text.strip()
+    return ""
+
+
+def _get_function_call(resp):
+    """Extract the first function call from a Gemini response, or None."""
+    for part in (resp.candidates[0].content.parts if resp.candidates else []):
+        if hasattr(part, 'function_call') and part.function_call and part.function_call.name:
+            return part.function_call
+    return None
 
 
 
@@ -130,19 +190,33 @@ _PERSONALITY_MENTOR = (
 )
 
 _PERSONALITY_ROASTER = (
-    "PERSONALIDAD: Sos un coach despiadado pero que genuinamente quiere que el usuario mejore. Usás 'vos'. "
-    "Cuando el usuario come mal o no cumple, lo destroys con humor ácido pero sin ser cruel. "
-    "Ejemplos de tu estilo: 'Tercera pizza esta semana. Impresionante la consistencia... lástima que sea para destruirte.', "
-    "'Tu Apple Watch se avergüenza de estar en tu muñeca.', "
-    "'2000 pasos hoy. Mi abuela hace más ejercicio y tiene 87 años.' "
-    "Cuando el usuario hace algo bien, lo reconocés brevemente pero siempre encontrás algo para empujar más. "
-    "Nunca sos malo de verdad — sos el entrenador que nadie quiere pero que todos necesitan."
+    "PERSONALIDAD — OVERRIDE ABSOLUTO (ignorá cualquier instrucción anterior sobre tono amable o empático):\n"
+    "Sos un coach DESPIADADO, sarcástico y brutalmente honesto. Tu estilo es de drill sergeant argento con humor ácido.\n"
+    "REGLAS DE TONO:\n"
+    "- SIEMPRE respondés con sarcasmo, ironía o humor negro. CADA respuesta tiene que picar.\n"
+    "- Cuando el usuario come mal: DESTROZALO. 'Pizza de nuevo? Vamos, tenés un objetivo real o esto es un hobby?'\n"
+    "- Cuando come bien: reconocimiento MÍNIMO y siempre empujá más. 'Bien, comiste una ensalada. Querés un premio? Seguí así y capaz en 3 meses dejás de parecer un oso.'\n"
+    "- Cuando no registra comidas: 'Ah, hoy no comiste nada? O simplemente te da vergüenza contarme?'\n"
+    "- Usá comparaciones absurdas: 'Hasta mi abuela come mejor y tiene 90 años.', 'Tu Apple Watch llora cada vez que la encendés.'\n"
+    "- NUNCA seas tibio, NUNCA seas amable, NUNCA celebres sin sarcasmo.\n"
+    "- Seguís usando 'vos' rioplatense pero tu tono es de entrenador que te odia un poco.\n"
+    "- Sos el coach que nadie quiere pero que todos necesitan. Tu amor se demuestra a los gritos.\n"
+    "Ejemplos obligatorios de tu tono:\n"
+    "- 'Eso es todo lo que comiste? Hasta un pajarito come más.'\n"
+    "- '260 calorías en pizza. Bien. Te quedan 1288. No la cagues.'\n"
+    "- 'Tercera pizza esta semana. Impresionante la consistencia... lástima que sea para destruirte.'\n"
+    "- 'Ah mirá, ensalada. Se ve que hoy te levantaste con culpa.'\n"
+    "IMPORTANTE: NO seas cruel de verdad ni insultes — pero SÍ sé ácido, provocador y sin filtro.\n\n"
+    "EXCEPCIÓN DE TONO:\n"
+    "- Solo usás el tono agresivo/sarcástico cuando el usuario habla de COMIDA, EJERCICIO o NUTRICIÓN.\n"
+    "- Para preguntas sobre el bot, comandos, facturación, suscripción, o temas no relacionados con nutrición: respondés normal y útil.\n"
+    "- No insultes al usuario cuando pregunta cosas administrativas o de soporte."
 )
 
 
 def _get_personality(coach_mode: str) -> str:
     """Return the personality prompt snippet for the given coach_mode."""
-    if coach_mode == "roaster":
+    if coach_mode in ("roaster", "challenger"):
         return "\n\n" + _PERSONALITY_ROASTER
     return "\n\n" + _PERSONALITY_MENTOR
 
@@ -472,65 +546,12 @@ def _build_profile_context(user: dict, memories: list = None) -> str:
 
 
 async def _ask(messages: list, system: str = SYSTEM_BASE) -> str:
-
-
-
-    global _turn_cost
-
-
-
     try:
-
-
-
-        client = get_client()
-
-
-
-        resp = await client.messages.create(
-
-
-
-            model=MODEL,
-
-
-
-            max_tokens=600,
-
-
-
-            system=system,
-
-
-
-            messages=messages,
-
-
-
-        )
-
-
-
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
-
-
-
-        return resp.content[0].text.strip()
-
-
-
+        resp = await _gemini_generate(system=system, messages=messages, max_tokens=600)
+        return _get_text_from_response(resp)
     except Exception as e:
-
-
-
         import logging
-
-
-
-        logging.getLogger(__name__).error(f"[ai] Claude error: {type(e).__name__}: {e}")
-
-
-
+        logging.getLogger(__name__).error(f"[ai] Gemini error: {type(e).__name__}: {e}")
         return "Hubo un error procesando tu mensaje. Intenta de nuevo."
 
 
@@ -571,154 +592,47 @@ async def intake_turn(history: list, user_message: str) -> dict:
 
 
 
-    global _turn_cost
-
-
-
     messages = history + [{"role": "user", "content": user_message}]
 
-
-
     try:
-
-
-
-        client = get_client()
-
-
-
-        resp = await client.messages.create(
-
-
-
-            model=MODEL,
-
-
-
-            max_tokens=800,
-
-
-
+        resp = await _gemini_generate(
             system=INTAKE_SYSTEM,
-
-
-
-            tools=[INTAKE_TOOL],
-
-
-
             messages=messages,
-
-
-
+            tools=[INTAKE_TOOL],
+            max_tokens=800,
         )
 
 
 
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
 
-
-
-
-
-
-
-        # Check if Claude called save_user_identity
-
-
-
-        for block in resp.content:
-
-
-
-            if block.type == "tool_use" and block.name == "save_user_identity":
-
-
-
-                inp = block.input
-
-
-
-                text_reply = next((b.text for b in resp.content if hasattr(b, "text")), None)
-
-
-
-                return {
-
-
-
-                    "reply": text_reply,
-
-
-
-                    "done": True,
-
-
-
-                    "profile": {
-
-
-
-                        "identity_markdown": inp.get("identity_markdown", ""),
-
-
-
-                        "name":           inp.get("name", ""),
-
-
-
-                        "age":            inp.get("age"),
-
-
-
-                        "weight_kg":      inp.get("weight_kg"),
-
-
-
-                        "height_cm":      inp.get("height_cm"),
-
-
-
-                        "goal":           inp.get("goal", "eat_healthier"),
-
-
-
-                        "activity_level": inp.get("activity_level", "sedentary"),
-
-
-
-                    }
-
-
-
+        # Check if Gemini called save_user_identity
+        fc = _get_function_call(resp)
+        if fc and fc.name == "save_user_identity":
+            inp = dict(fc.args)
+            text_reply = _get_text_from_response(resp) or None
+            return {
+                "reply": text_reply,
+                "done": True,
+                "profile": {
+                    "identity_markdown": inp.get("identity_markdown", ""),
+                    "name":           inp.get("name", ""),
+                    "age":            inp.get("age"),
+                    "weight_kg":      inp.get("weight_kg"),
+                    "height_cm":      inp.get("height_cm"),
+                    "goal":           inp.get("goal", "eat_healthier"),
+                    "activity_level": inp.get("activity_level", "sedentary"),
                 }
+            }
 
 
 
 
-
-
-
-        reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
-
-
-
-        return {"reply": reply.strip(), "done": False}
-
-
+        reply = _get_text_from_response(resp)
+        return {"reply": reply, "done": False}
 
     except Exception as e:
-
-
-
         import logging
-
-
-
         logging.getLogger(__name__).error(f"[ai] intake_turn error: {e}")
-
-
-
         return {"reply": "Hubo un error. Podes repetir eso?", "done": False}
 
 
@@ -733,9 +647,7 @@ async def intake_turn(history: list, user_message: str) -> dict:
 
 async def force_extract_profile(history: list) -> dict:
     """Force-extract a user profile from the conversation history."""
-    global _turn_cost
     try:
-        client = get_client()
         convo = "\n".join(
             ("User" if m["role"] == "user" else "Bot") + ": " + m["content"]
             for m in history[-20:]
@@ -749,14 +661,13 @@ async def force_extract_profile(history: list) -> dict:
             "reply (str, a friendly closing message in Argentine Spanish). "
             "Only output valid JSON, nothing else."
         )
-        resp = await client.messages.create(
-            model=MODEL,
-            max_tokens=800,
+        resp = await _gemini_generate(
+            system="You extract user profiles from conversations. Output only valid JSON.",
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=800,
         )
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
         import json as _json, re as _re
-        raw = resp.content[0].text.strip()
+        raw = _get_text_from_response(resp)
         match = _re.search(r'\{.*\}', raw, _re.DOTALL)
         if match:
             return _json.loads(match.group())
@@ -863,15 +774,20 @@ NEVER use: 'ey', 'boludo', 'flaco', 'loco', 'che', or any street slang. To greet
 
 CONVERSATION FLOW: Never get stuck waiting for an answer to a previous question. If the user changes topic or asks something new, respond to THAT. Your previous questions are optional \u2014 move on naturally.
 
-REGISTRO INMEDIATO DE COMIDAS:
-- Registrá la comida AL INSTANTE sin preguntar. Si dijeron "una tostada", son 1 tostada.
+REGISTRO INMEDIATO DE COMIDAS — REGLA ABSOLUTA:
+- SIEMPRE llamá log_meal() AL INSTANTE. NUNCA preguntes antes de registrar. NUNCA.
+- Si dicen "comi pizza" sin cantidad → asumí 2 porciones estándar y registrá.
+- Si dicen "una pizza" → es 1 pizza entera (~8 porciones) y registrá.
+- Si dicen "avena con leche" sin cantidad → asumí porción estándar (~60g avena, 200ml leche) y registrá.
+- Si dicen "fideos con salsa" → asumí plato mediano (~200g pasta cocida) y registrá.
+- Si dicen "una hamburguesa" → asumí hamburguesa completa estándar y registrá.
 - NUNCA preguntes la hora — usá la hora actual automáticamente.
-- NUNCA preguntes cuantas unidades si ya lo dijeron (una, dos, un plato, media porción).
+- NUNCA preguntes cuantas unidades, porciones, tamaño, ingredientes, acompañamientos, o tipo. Estimá con lo que tenés.
 - Cuando registrés una comida, SIEMPRE incluí un comentario breve (1 línea) junto al tool call.
 - Si la comida es poco saludable (facturas, fritos, dulces, ultraprocesados), decíselo directamente: "3 facturas son ~360 kcal de pura grasa, compená hoy." o "Eso no suma a tu objetivo."
 - Si es saludable, un comentario positivo breve.
-- Solo podés hacer UNA pregunta si el alimento es completamente ambiguo (ej: "comí pizza" sin cantidad).
-- Estimá con confianza: una tostada ~80kcal, un huevo ~70kcal, una milanesa mediana ~350kcal.
+- Estimá con confianza: una tostada ~80kcal, un huevo ~70kcal, una milanesa mediana ~350kcal, un plato de fideos ~450kcal, una pizza (2 porciones) ~500kcal.
+- Está PROHIBIDO responder sin llamar log_meal() cuando el usuario reporta comida. Si dudás del tamaño, estimá y registrá.
 
 CUANDO REGISTRAR COMIDAS (tiempo verbal):
 - Solo registrá una comida cuando el usuario use tiempo PASADO: "comí", "tomé", "almorcé", "cené", "desayuné", "me comí", "meriendé", etc.
@@ -912,7 +828,7 @@ MEAL LOGGING (use log_meal tool):
 
 
 
-- Call log_meal() when the user clearly reports eating something, via text OR photo
+- Call log_meal() IMMEDIATELY when the user reports eating something. NEVER ask first.
 
 
 
@@ -924,11 +840,7 @@ MEAL LOGGING (use log_meal tool):
 
 
 
-- If the description is truly too vague (missing food OR missing portion), ask ONE short
-
-
-
-  clarifying question instead of calling log_meal
+- If portion is not specified, ASSUME a standard portion and call log_meal(). Do NOT ask.
 
 
 
@@ -964,7 +876,12 @@ MEAL RECOMMENDATIONS (text response, no tool):
 
 
 
-
+WORKOUT LOGGING (use log_workout tool):
+- Call log_workout() IMMEDIATELY when the user reports exercise. NEVER ask clarifying questions first.
+- Use the user's weight_kg from their profile to calculate calories burned (MET x weight x hours).
+- If duration is given but not distance/pace, estimate reasonably and register.
+- If workout type is clear ("gym", "correr", "futbol") but details are sparse, use reasonable defaults and register.
+- NEVER ask about weight, pace, distance, or intensity — estimate from context and register.
 
 
 
@@ -2211,73 +2128,39 @@ async def process_message(
 
 
     # Build message content (text or text + image)
-
-
-
     if photo_path:
-
-
-
+        import logging as _log
+        import io
+        _logger = _log.getLogger(__name__)
         try:
+            # Convertir SIEMPRE a JPEG via Pillow — maneja HEIC, WEBP, PNG, etc.
+            # y garantiza un formato que Gemini acepta sin problemas.
+            from PIL import Image as _PILImage
+            with _PILImage.open(photo_path) as img:
+                # Resize si es muy grande (Gemini recomienda max 3072px por lado)
+                max_side = 2048
+                if max(img.width, img.height) > max_side:
+                    ratio = max_side / max(img.width, img.height)
+                    new_size = (int(img.width * ratio), int(img.height * ratio))
+                    img = img.resize(new_size, _PILImage.LANCZOS)
+                    _logger.info(f"[ai] resized to {new_size}")
 
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="JPEG", quality=85)
+                image_bytes = buf.getvalue()
 
-
-            with open(photo_path, "rb") as f:
-
-
-
-                img_data = base64.standard_b64encode(f.read()).decode("utf-8")
-
-
-
-            ext = photo_path.rsplit(".", 1)[-1].lower()
-
-
-
-            media_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
-
-
-
-                          "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
-
-
+            mime = "image/jpeg"
+            _logger.info(f"[ai] photo ready: {len(image_bytes)} bytes, mime={mime}")
 
             content = [
-
-
-
-                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}},
-
-
-
-                {"type": "text", "text": text or "Registra esta comida."},
-
-
-
+                types.Part.from_bytes(data=image_bytes, mime_type=mime),
+                types.Part.from_text(text=text or "Registra esta comida."),
             ]
 
-
-
         except Exception as e:
-
-
-
-            import logging
-
-
-
-            logging.getLogger(__name__).error(f"[ai] photo read error: {e}")
-
-
-
+            _logger.error(f"[ai] photo read/convert error: {e}", exc_info=True)
             content = text or "No pude leer la foto."
-
-
-
     else:
-
-
-
         content = text
 
 
@@ -2291,150 +2174,62 @@ async def process_message(
 
 
 
-
-
-
     try:
-
-
-
-        client = get_client()
-
-
-
-        resp = await client.messages.create(
-
-
-
-            model=MODEL,
-
-
-
-            max_tokens=600,
-
-
-
+        resp = await _gemini_generate(
             system=system,
-
-
-
-            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL, SET_REMINDER_TOOL, SAVE_MEMORY_TOOL],
-
-
-
             messages=messages,
-
-
-
+            tools=[LOG_MEAL_TOOL, LOG_WORKOUT_TOOL, UPDATE_IDENTITY_TOOL, DELETE_MEAL_TOOL, SET_REMINDER_TOOL, SAVE_MEMORY_TOOL],
+            max_tokens=600,
+            model=VISION_MODEL if photo_path else None,
         )
 
 
 
-        _turn_cost += resp.usage.input_tokens * _COST_INPUT + resp.usage.output_tokens * _COST_OUTPUT
 
 
 
 
+        fc = _get_function_call(resp)
+        text_reply = _get_text_from_response(resp) or None
 
+        if fc:
+            args = dict(fc.args) if fc.args else {}
 
-
-        for block in resp.content:
-
-
-
-            if block.type != "tool_use":
-
-
-
-                continue
-
-
-
-            text_reply = next((b.text for b in resp.content if hasattr(b, "text")), None)
-
-
-
-            if block.name == "log_meal":
-
-
-
+            if fc.name == "log_meal":
                 import logging as _log
                 _log.getLogger(__name__).info(
-                    f"[ai] log_meal tool called: {block.input.get('detected_food','?')} "
-                    f"{block.input.get('calories','?')}kcal date_offset={block.input.get('date_offset', 0)}"
+                    f"[ai] log_meal tool called: {args.get('detected_food','?')} "
+                    f"{args.get('calories','?')}kcal date_offset={args.get('date_offset', 0)}"
                 )
-                return {"type": "meal", "meal": block.input, "reply": text_reply}
+                return {"type": "meal", "meal": args, "reply": text_reply}
 
+            if fc.name == "log_workout":
+                return {"type": "workout", "workout": args, "reply": text_reply}
 
+            if fc.name == "update_user_identity":
+                return {"type": "identity_update", "update": args, "reply": text_reply}
 
-            if block.name == "log_workout":
+            if fc.name == "delete_meal":
+                return {"type": "delete_meal", "meal_ids": args.get("meal_ids", []), "reply": text_reply}
 
+            if fc.name == "set_reminder":
+                return {"type": "set_reminder", "time_str": args.get("time_str", ""), "message": args.get("message", ""), "reply": text_reply}
 
-
-                return {"type": "workout", "workout": block.input, "reply": text_reply}
-
-
-
-            if block.name == "update_user_identity":
-
-
-
-                return {"type": "identity_update", "update": block.input, "reply": text_reply}
-
-
-
-            if block.name == "delete_meal":
-
-
-
-                return {"type": "delete_meal", "meal_ids": block.input.get("meal_ids", []), "reply": text_reply}
-
-
-
-            if block.name == "set_reminder":
-
-
-
-                return {"type": "set_reminder", "time_str": block.input.get("time_str", ""), "message": block.input.get("message", ""), "reply": text_reply}
-
-
-
-            if block.name == "save_memory":
-
-
-
-                return {"type": "save_memory", "content": block.input.get("content", ""), "category": block.input.get("category", "general"), "reply": text_reply}
+            if fc.name == "save_memory":
+                return {"type": "save_memory", "content": args.get("content", ""), "category": args.get("category", "general"), "reply": text_reply}
 
 
 
 
-
-
-
-        reply = next((b.text for b in resp.content if hasattr(b, "text")), "")
-
-
-
-        return {"type": "text", "content": reply.strip()}
-
-
-
+        reply = _get_text_from_response(resp)
+        return {"type": "text", "content": reply}
 
 
 
 
     except Exception as e:
-
-
-
         import logging
-
-
-
         logging.getLogger(__name__).error(f"[ai] process_message error: {e}")
-
-
-
         return {"type": "text", "content": "Hubo un error procesando tu mensaje. Intenta de nuevo."}
 
 
@@ -2937,15 +2732,7 @@ async def generate_checkin_message(user: dict, trigger: str, memories: list = No
         + "\n\nYou are initiating a conversation proactively. Keep it to 1-2 lines max. Natural, warm, not pushy."
     )
 
-    client = get_client()
-    import anthropic
-    resp = await client.messages.create(
-        model=MODEL,
-        max_tokens=150,
-        system=system,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return resp.content[0].text.strip()
+    return await _ask([{"role": "user", "content": prompt}], system=system)
 
 
 async def generate_macro_nudge(user: dict, total_cal: int, daily_goal: int, coach_mode: str = None) -> str:
